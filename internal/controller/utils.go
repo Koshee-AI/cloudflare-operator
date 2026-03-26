@@ -40,6 +40,10 @@ const (
 	configmapKey         = "config.yaml"
 )
 
+// testCfClientOpts allows tests to inject cloudflare.Option values (e.g., BaseURL for mock servers)
+// into all controllers without modifying their initStruct methods.
+var testCfClientOpts []cloudflare.Option
+
 var tunnelValidProtoMap = map[string]bool{
 	tunnelProtoHTTP:  true,
 	tunnelProtoHTTPS: true,
@@ -95,7 +99,8 @@ func getAPIDetails(
 	apiKey := string(cfAPIKeyB64)
 	apiEmail := tunnelSpec.Cloudflare.Email
 
-	cloudflareClient, err := getCloudflareClient(apiKey, apiEmail, apiToken, cfClientOpts...)
+	allOpts := append(cfClientOpts, testCfClientOpts...)
+	cloudflareClient, err := getCloudflareClient(apiKey, apiEmail, apiToken, allOpts...)
 	if err != nil {
 		log.Error(err, "error initializing cloudflare api client", "client", cloudflareClient)
 		return &cf.API{}, &corev1.Secret{}, err
