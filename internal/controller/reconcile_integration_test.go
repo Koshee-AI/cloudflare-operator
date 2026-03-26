@@ -1102,3 +1102,115 @@ func TestTunnelBindingReconcile_FullFlow_CredentialSecretRef(t *testing.T) {
 		t.Errorf("label %s = %q, want %q", tunnelNameLabel, updatedBinding.Labels[tunnelNameLabel], "my-tunnel")
 	}
 }
+
+// TestTunnelReconcile_NotFound verifies that reconciling a non-existent Tunnel returns nil.
+func TestTunnelReconcile_NotFound(t *testing.T) {
+	scheme := integrationScheme()
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	innerClient := &integrationApplyClient{Client: k8sClient}
+
+	r := &TunnelReconciler{
+		Client:   innerClient,
+		Scheme:   scheme,
+		Recorder: record.NewFakeRecorder(10),
+	}
+
+	result, err := r.Reconcile(context.Background(), reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: "nonexistent", Namespace: "default"},
+	})
+	if err != nil {
+		t.Errorf("expected nil error, got %v", err)
+	}
+	if result != (ctrl.Result{}) {
+		t.Errorf("expected empty result, got %v", result)
+	}
+}
+
+// TestClusterTunnelReconcile_NotFound verifies that reconciling a non-existent ClusterTunnel returns nil.
+func TestClusterTunnelReconcile_NotFound(t *testing.T) {
+	scheme := integrationScheme()
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	innerClient := &integrationApplyClient{Client: k8sClient}
+
+	r := &ClusterTunnelReconciler{
+		Client:    innerClient,
+		Scheme:    scheme,
+		Recorder:  record.NewFakeRecorder(10),
+		Namespace: "cloudflare-operator-system",
+	}
+
+	result, err := r.Reconcile(context.Background(), reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: "nonexistent"},
+	})
+	if err != nil {
+		t.Errorf("expected nil error, got %v", err)
+	}
+	if result != (ctrl.Result{}) {
+		t.Errorf("expected empty result, got %v", result)
+	}
+}
+
+// TestTunnelReconcile_InitStructFailure verifies that Reconcile returns error when Secret is missing.
+func TestTunnelReconcile_InitStructFailure(t *testing.T) {
+	scheme := integrationScheme()
+
+	// Create Tunnel but NO Secret — initStruct will fail
+	tunnel := &networkingv1alpha2.Tunnel{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-tunnel", Namespace: "default"},
+		Spec: networkingv1alpha2.TunnelSpec{
+			Cloudflare: networkingv1alpha2.CloudflareDetails{
+				Secret:               "missing-secret",
+				Domain:               "example.com",
+				CLOUDFLARE_API_TOKEN: "CLOUDFLARE_API_TOKEN",
+			},
+			NewTunnel:      &networkingv1alpha2.NewTunnel{Name: "test"},
+			FallbackTarget: "http_status:404",
+		},
+	}
+
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tunnel).
+		WithStatusSubresource(&networkingv1alpha2.Tunnel{}).Build()
+	innerClient := &integrationApplyClient{Client: k8sClient}
+
+	r := &TunnelReconciler{
+		Client:   innerClient,
+		Scheme:   scheme,
+		Recorder: record.NewFakeRecorder(10),
+	}
+
+	_, err := r.Reconcile(context.Background(), reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: "my-tunnel", Namespace: "default"},
+	})
+	if err == nil {
+		t.Error("expected error from missing secret, got nil")
+	}
+}
+
+// TestTunnelBindingReconcile_InitStructFailure verifies that Reconcile returns error when Tunnel is missing.
+func TestTunnelBindingReconcile_InitStructFailure(t *testing.T) {
+	scheme := integrationScheme()
+
+	// Create TunnelBinding but NO Tunnel — initStruct will fail
+	binding := &networkingv1alpha1.TunnelBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-binding", Namespace: "default"},
+		Subjects:   []networkingv1alpha1.TunnelBindingSubject{{Name: "svc"}},
+		TunnelRef:  networkingv1alpha1.TunnelRef{Kind: "Tunnel", Name: "missing-tunnel"},
+	}
+
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(binding).
+		WithStatusSubresource(&networkingv1alpha1.TunnelBinding{}).Build()
+
+	r := &TunnelBindingReconciler{
+		Client:    k8sClient,
+		Scheme:    scheme,
+		Recorder:  record.NewFakeRecorder(10),
+		Namespace: "cloudflare-operator-system",
+	}
+
+	_, err := r.Reconcile(context.Background(), reconcile.Request{
+		NamespacedName: types.NamespacedName{Name: "my-binding", Namespace: "default"},
+	})
+	if err == nil {
+		t.Error("expected error from missing tunnel, got nil")
+	}
+}
