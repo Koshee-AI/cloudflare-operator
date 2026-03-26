@@ -1061,3 +1061,709 @@ func TestLabelsForTunnel(t *testing.T) {
 		t.Errorf("expected %d labels, got %d", len(checks), len(labels))
 	}
 }
+
+func TestSetupNewTunnel(t *testing.T) {
+	tunnel := newTestTunnelObj("new-tun", "default")
+	tunnel.Spec.NewTunnel = &networkingv1alpha2.NewTunnel{Name: "new-tun"}
+	tunnel.Spec.ExistingTunnel = nil
+	tunnel.Status.TunnelId = ""
+	tunnel.Status.TunnelName = ""
+
+	scheme := newTestScheme()
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(tunnel).
+		Build()
+
+	// Mock CF server: CreateTunnel needs account validation + tunnel creation
+	handlers := map[string]http.HandlerFunc{
+		"GET /accounts/acc-123": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"success":true,"errors":[],"messages":[],"result":{"id":"acc-123","name":"test-account"}}`))
+		},
+		"POST /accounts/acc-123/cfd_tunnel": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"success":true,"errors":[],"messages":[],"result":{"id":"new-tun-id","name":"new-tun"}}`))
+		},
+	}
+	cfAPI, server := newCfAPIWithMock(t, handlers)
+	defer server.Close()
+	// Clear pre-populated valid IDs so CreateTunnel resolves them
+	cfAPI.ValidTunnelId = ""
+	cfAPI.ValidTunnelName = ""
+
+	r := &testReconciler{
+		client:   fakeClient,
+		scheme:   scheme,
+		recorder: record.NewFakeRecorder(100),
+		ctx:      context.Background(),
+		log:      logrtesting.New(t),
+		tunnel:   TunnelAdapter{Tunnel: tunnel},
+		cfAPI:    cfAPI,
+		cfSecret: &corev1.Secret{},
+	}
+
+	err := setupNewTunnel(r)
+	if err != nil {
+		t.Fatalf("setupNewTunnel returned error: %v", err)
+	}
+
+	// CreateTunnel sets ValidTunnelId
+	if cfAPI.ValidTunnelId != "new-tun-id" {
+		t.Errorf("ValidTunnelId = %q, want %q", cfAPI.ValidTunnelId, "new-tun-id")
+	}
+
+	// tunnelCreds should be non-empty JSON
+	if r.tunnelCreds == "" {
+		t.Fatal("tunnelCreds should be non-empty after CreateTunnel")
+	}
+	var creds cf.TunnelCredentialsFile
+	if err := json.Unmarshal([]byte(r.tunnelCreds), &creds); err != nil {
+		t.Fatalf("tunnelCreds is not valid JSON: %v", err)
+	}
+	if creds.TunnelID != "new-tun-id" {
+		t.Errorf("creds.TunnelID = %q, want %q", creds.TunnelID, "new-tun-id")
+	}
+
+	// Finalizer should have been added
+	updatedTunnel := &networkingv1alpha2.Tunnel{}
+	if err := fakeClient.Get(context.Background(), types.NamespacedName{Name: "new-tun", Namespace: "default"}, updatedTunnel); err != nil {
+		t.Fatalf("failed to get updated tunnel: %v", err)
+	}
+	found := false
+	for _, f := range updatedTunnel.Finalizers {
+		if f == tunnelFinalizer {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected tunnelFinalizer to be added to tunnel object")
+	}
+}
+
+func TestSetupNewTunnel_AlreadyCreated(t *testing.T) {
+	tunnel := newTestTunnelObj("existing-tun", "default")
+	tunnel.Spec.NewTunnel = &networkingv1alpha2.NewTunnel{Name: "existing-tun"}
+	tunnel.Spec.ExistingTunnel = nil
+	tunnel.Status.TunnelId = "existing-id"
+	tunnel.Status.TunnelName = "existing-tun"
+
+	// Pre-create the Secret with credentials
+	credsJSON := `{"AccountTag":"acc-123","TunnelID":"existing-id","TunnelName":"existing-tun","TunnelSecret":"c2VjcmV0"}`
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "existing-tun",
+			Namespace: "default",
+		},
+		Data: map[string][]byte{
+			CredentialsJsonFilename: []byte(credsJSON),
+		},
+	}
+
+	scheme := newTestScheme()
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(tunnel, secret).
+		Build()
+
+	// No CreateTunnel handler -- if called, the test will fail with unhandled route
+	createCalled := false
+	handlers := map[string]http.HandlerFunc{
+		"POST /accounts/acc-123/cfd_tunnel": func(w http.ResponseWriter, r *http.Request) {
+			createCalled = true
+			w.WriteHeader(http.StatusInternalServerError)
+		},
+	}
+	cfAPI, server := newCfAPIWithMock(t, handlers)
+	defer server.Close()
+
+	r := &testReconciler{
+		client:   fakeClient,
+		scheme:   scheme,
+		recorder: record.NewFakeRecorder(100),
+		ctx:      context.Background(),
+		log:      logrtesting.New(t),
+		tunnel:   TunnelAdapter{Tunnel: tunnel},
+		cfAPI:    cfAPI,
+		cfSecret: &corev1.Secret{},
+	}
+
+	err := setupNewTunnel(r)
+	if err != nil {
+		t.Fatalf("setupNewTunnel returned error: %v", err)
+	}
+
+	if createCalled {
+		t.Error("CreateTunnel should not be called when TunnelId is already set")
+	}
+
+	// Creds should be read from the existing secret
+	if r.tunnelCreds != credsJSON {
+		t.Errorf("tunnelCreds = %q, want %q", r.tunnelCreds, credsJSON)
+	}
+}
+
+func TestSetupExistingTunnel(t *testing.T) {
+	tunnel := newTestTunnelObj("ext-tun", "default")
+	tunnel.Spec.ExistingTunnel = &networkingv1alpha2.ExistingTunnel{
+		Id:   "ext-id",
+		Name: "ext-tun",
+	}
+	tunnel.Spec.NewTunnel = nil
+	tunnel.Spec.Cloudflare.CLOUDFLARE_TUNNEL_CREDENTIAL_FILE = "CLOUDFLARE_TUNNEL_CREDENTIAL_FILE"
+	tunnel.Spec.Cloudflare.CLOUDFLARE_TUNNEL_CREDENTIAL_SECRET = "CLOUDFLARE_TUNNEL_CREDENTIAL_SECRET"
+
+	credsJSON := `{"AccountTag":"acc-123","TunnelID":"ext-id","TunnelName":"ext-tun","TunnelSecret":"c2VjcmV0"}`
+	cfSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cf-secret",
+			Namespace: "default",
+		},
+		Data: map[string][]byte{
+			"CLOUDFLARE_TUNNEL_CREDENTIAL_FILE": []byte(credsJSON),
+		},
+	}
+
+	scheme := newTestScheme()
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	cfAPI, server := newCfAPIWithMock(t, map[string]http.HandlerFunc{})
+	defer server.Close()
+
+	r := &testReconciler{
+		client:   fakeClient,
+		scheme:   scheme,
+		recorder: record.NewFakeRecorder(100),
+		ctx:      context.Background(),
+		log:      logrtesting.New(t),
+		tunnel:   TunnelAdapter{Tunnel: tunnel},
+		cfAPI:    cfAPI,
+		cfSecret: cfSecret,
+	}
+
+	err := setupExistingTunnel(r)
+	if err != nil {
+		t.Fatalf("setupExistingTunnel returned error: %v", err)
+	}
+
+	if r.cfAPI.TunnelId != "ext-id" {
+		t.Errorf("cfAPI.TunnelId = %q, want %q", r.cfAPI.TunnelId, "ext-id")
+	}
+	if r.tunnelCreds != credsJSON {
+		t.Errorf("tunnelCreds = %q, want %q", r.tunnelCreds, credsJSON)
+	}
+}
+
+func TestSetupExistingTunnel_FromSecret(t *testing.T) {
+	tunnel := newTestTunnelObj("ext-tun", "default")
+	tunnel.Spec.ExistingTunnel = &networkingv1alpha2.ExistingTunnel{
+		Id:   "ext-id",
+		Name: "ext-tun",
+	}
+	tunnel.Spec.NewTunnel = nil
+	tunnel.Spec.Cloudflare.CLOUDFLARE_TUNNEL_CREDENTIAL_FILE = "CLOUDFLARE_TUNNEL_CREDENTIAL_FILE"
+	tunnel.Spec.Cloudflare.CLOUDFLARE_TUNNEL_CREDENTIAL_SECRET = "CLOUDFLARE_TUNNEL_CREDENTIAL_SECRET"
+
+	tunnelSecret := "my-tunnel-secret-string"
+	cfSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cf-secret",
+			Namespace: "default",
+		},
+		Data: map[string][]byte{
+			"CLOUDFLARE_TUNNEL_CREDENTIAL_SECRET": []byte(tunnelSecret),
+		},
+	}
+
+	scheme := newTestScheme()
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	// GetTunnelCreds calls GetAccountId and GetTunnelId (validate via mock)
+	handlers := map[string]http.HandlerFunc{
+		"GET /accounts/acc-123": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"success":true,"errors":[],"messages":[],"result":{"id":"acc-123","name":"test-account"}}`))
+		},
+		"GET /accounts/acc-123/cfd_tunnel/ext-id": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"success":true,"errors":[],"messages":[],"result":{"id":"ext-id","name":"ext-tun"}}`))
+		},
+		"GET /zones": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"success":true,"errors":[],"messages":[],"result":[{"id":"zone-789","name":"example.com"}],"result_info":{"page":1,"per_page":50,"total_pages":1,"count":1,"total_count":1}}`))
+		},
+	}
+	cfAPI, server := newCfAPIWithMock(t, handlers)
+	defer server.Close()
+	// Clear ValidTunnelId so GetTunnelId validates via mock
+	cfAPI.ValidTunnelId = ""
+	cfAPI.ValidTunnelName = ""
+
+	r := &testReconciler{
+		client:   fakeClient,
+		scheme:   scheme,
+		recorder: record.NewFakeRecorder(100),
+		ctx:      context.Background(),
+		log:      logrtesting.New(t),
+		tunnel:   TunnelAdapter{Tunnel: tunnel},
+		cfAPI:    cfAPI,
+		cfSecret: cfSecret,
+	}
+
+	err := setupExistingTunnel(r)
+	if err != nil {
+		t.Fatalf("setupExistingTunnel returned error: %v", err)
+	}
+
+	// tunnelCreds should contain constructed credentials JSON via GetTunnelCreds
+	if r.tunnelCreds == "" {
+		t.Fatal("tunnelCreds should be non-empty")
+	}
+	var credsMap map[string]string
+	if err := json.Unmarshal([]byte(r.tunnelCreds), &credsMap); err != nil {
+		t.Fatalf("tunnelCreds is not valid JSON: %v", err)
+	}
+	if credsMap["AccountTag"] != "acc-123" {
+		t.Errorf("creds AccountTag = %q, want %q", credsMap["AccountTag"], "acc-123")
+	}
+	if credsMap["TunnelID"] != "ext-id" {
+		t.Errorf("creds TunnelID = %q, want %q", credsMap["TunnelID"], "ext-id")
+	}
+	if credsMap["TunnelSecret"] != tunnelSecret {
+		t.Errorf("creds TunnelSecret = %q, want %q", credsMap["TunnelSecret"], tunnelSecret)
+	}
+}
+
+func TestSetupTunnel_NewTunnel(t *testing.T) {
+	tunnel := newTestTunnelObj("new-tun", "default")
+	tunnel.Spec.NewTunnel = &networkingv1alpha2.NewTunnel{Name: "new-tun"}
+	tunnel.Spec.ExistingTunnel = nil
+	tunnel.Status.TunnelId = ""
+	tunnel.Status.TunnelName = ""
+
+	scheme := newTestScheme()
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(tunnel).
+		Build()
+
+	handlers := map[string]http.HandlerFunc{
+		"GET /accounts/acc-123": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"success":true,"errors":[],"messages":[],"result":{"id":"acc-123","name":"test-account"}}`))
+		},
+		"POST /accounts/acc-123/cfd_tunnel": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"success":true,"errors":[],"messages":[],"result":{"id":"created-tun","name":"new-tun"}}`))
+		},
+	}
+	cfAPI, server := newCfAPIWithMock(t, handlers)
+	defer server.Close()
+	cfAPI.ValidTunnelId = ""
+	cfAPI.ValidTunnelName = ""
+
+	r := &testReconciler{
+		client:   fakeClient,
+		scheme:   scheme,
+		recorder: record.NewFakeRecorder(100),
+		ctx:      context.Background(),
+		log:      logrtesting.New(t),
+		tunnel:   TunnelAdapter{Tunnel: tunnel},
+		cfAPI:    cfAPI,
+		cfSecret: &corev1.Secret{},
+	}
+
+	result, ok, err := setupTunnel(r)
+	if err != nil {
+		t.Fatalf("setupTunnel returned error: %v", err)
+	}
+	if !ok {
+		t.Errorf("setupTunnel ok = false, want true; result = %v", result)
+	}
+
+	// Tunnel creation happened
+	if cfAPI.ValidTunnelId != "created-tun" {
+		t.Errorf("ValidTunnelId = %q, want %q", cfAPI.ValidTunnelId, "created-tun")
+	}
+}
+
+func TestSetupTunnel_ExistingTunnel(t *testing.T) {
+	tunnel := newTestTunnelObj("ext-tun", "default")
+	tunnel.Spec.ExistingTunnel = &networkingv1alpha2.ExistingTunnel{
+		Id:   "ext-id",
+		Name: "ext-tun",
+	}
+	tunnel.Spec.NewTunnel = nil
+	tunnel.Spec.Cloudflare.CLOUDFLARE_TUNNEL_CREDENTIAL_FILE = "CLOUDFLARE_TUNNEL_CREDENTIAL_FILE"
+
+	credsJSON := `{"AccountTag":"acc-123","TunnelID":"ext-id","TunnelName":"ext-tun","TunnelSecret":"c2VjcmV0"}`
+	cfSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cf-secret",
+			Namespace: "default",
+		},
+		Data: map[string][]byte{
+			"CLOUDFLARE_TUNNEL_CREDENTIAL_FILE": []byte(credsJSON),
+		},
+	}
+
+	scheme := newTestScheme()
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	createCalled := false
+	handlers := map[string]http.HandlerFunc{
+		"POST /accounts/acc-123/cfd_tunnel": func(w http.ResponseWriter, r *http.Request) {
+			createCalled = true
+			w.WriteHeader(http.StatusInternalServerError)
+		},
+	}
+	cfAPI, server := newCfAPIWithMock(t, handlers)
+	defer server.Close()
+
+	r := &testReconciler{
+		client:   fakeClient,
+		scheme:   scheme,
+		recorder: record.NewFakeRecorder(100),
+		ctx:      context.Background(),
+		log:      logrtesting.New(t),
+		tunnel:   TunnelAdapter{Tunnel: tunnel},
+		cfAPI:    cfAPI,
+		cfSecret: cfSecret,
+	}
+
+	result, ok, err := setupTunnel(r)
+	if err != nil {
+		t.Fatalf("setupTunnel returned error: %v", err)
+	}
+	if !ok {
+		t.Errorf("setupTunnel ok = false, want true; result = %v", result)
+	}
+	if createCalled {
+		t.Error("CreateTunnel should not be called for ExistingTunnel")
+	}
+}
+
+func TestSetupTunnel_BothSpecsSet(t *testing.T) {
+	tunnel := newTestTunnelObj("bad-tun", "default")
+	tunnel.Spec.NewTunnel = &networkingv1alpha2.NewTunnel{Name: "bad-tun"}
+	tunnel.Spec.ExistingTunnel = &networkingv1alpha2.ExistingTunnel{Id: "ext-id", Name: "ext-tun"}
+
+	scheme := newTestScheme()
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	r := &testReconciler{
+		client:   fakeClient,
+		scheme:   scheme,
+		recorder: record.NewFakeRecorder(100),
+		ctx:      context.Background(),
+		log:      logrtesting.New(t),
+		tunnel:   TunnelAdapter{Tunnel: tunnel},
+		cfAPI:    &cf.API{Log: logrtesting.New(t)},
+		cfSecret: &corev1.Secret{},
+	}
+
+	_, _, err := setupTunnel(r)
+	if err == nil {
+		t.Fatal("expected error when both NewTunnel and ExistingTunnel are set")
+	}
+}
+
+func TestSetupTunnel_NeitherSpecSet(t *testing.T) {
+	tunnel := newTestTunnelObj("bad-tun", "default")
+	tunnel.Spec.NewTunnel = nil
+	tunnel.Spec.ExistingTunnel = nil
+
+	scheme := newTestScheme()
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+	r := &testReconciler{
+		client:   fakeClient,
+		scheme:   scheme,
+		recorder: record.NewFakeRecorder(100),
+		ctx:      context.Background(),
+		log:      logrtesting.New(t),
+		tunnel:   TunnelAdapter{Tunnel: tunnel},
+		cfAPI:    &cf.API{Log: logrtesting.New(t)},
+		cfSecret: &corev1.Secret{},
+	}
+
+	_, _, err := setupTunnel(r)
+	if err == nil {
+		t.Fatal("expected error when neither NewTunnel nor ExistingTunnel is set")
+	}
+}
+
+func TestCleanupTunnel(t *testing.T) {
+	now := metav1.Now()
+	tunnel := newTestTunnelObj("del-tun", "default")
+	tunnel.Finalizers = []string{tunnelFinalizer}
+	tunnel.DeletionTimestamp = &now
+
+	// Deployment with replicas=0 (already scaled down)
+	var replicas int32
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "del-tun",
+			Namespace: "default",
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{tunnelLabel: "del-tun"},
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{tunnelLabel: "del-tun"},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "cloudflared", Image: "cloudflare/cloudflared:latest"}},
+				},
+			},
+		},
+	}
+
+	scheme := newTestScheme()
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(tunnel, dep).
+		WithStatusSubresource(&networkingv1alpha2.Tunnel{}).
+		Build()
+
+	// Mock CF server for cleanup: ClearTunnelConfiguration, CleanupTunnelConnections, DeleteTunnel
+	clearConfigCalled := false
+	cleanupConnCalled := false
+	deleteTunnelCalled := false
+	handlers := map[string]http.HandlerFunc{
+		// ValidateAll endpoints (needed by ClearTunnelConfiguration -> UpdateTunnelConfiguration -> ValidateAll)
+		"GET /accounts/acc-123": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"success":true,"errors":[],"messages":[],"result":{"id":"acc-123","name":"test-account"}}`))
+		},
+		"GET /accounts/acc-123/cfd_tunnel/tun-456": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"success":true,"errors":[],"messages":[],"result":{"id":"tun-456","name":"test-tunnel"}}`))
+		},
+		"GET /zones": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"success":true,"errors":[],"messages":[],"result":[{"id":"zone-789","name":"example.com"}],"result_info":{"page":1,"per_page":50,"total_pages":1,"count":1,"total_count":1}}`))
+		},
+		"PUT /accounts/acc-123/cfd_tunnel/tun-456/configurations": func(w http.ResponseWriter, r *http.Request) {
+			clearConfigCalled = true
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"success":true,"errors":[],"messages":[],"result":{}}`))
+		},
+		"DELETE /accounts/acc-123/cfd_tunnel/tun-456/connections": func(w http.ResponseWriter, r *http.Request) {
+			cleanupConnCalled = true
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"success":true,"errors":[],"messages":[],"result":null}`))
+		},
+		"DELETE /accounts/acc-123/cfd_tunnel/tun-456": func(w http.ResponseWriter, r *http.Request) {
+			deleteTunnelCalled = true
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"success":true,"errors":[],"messages":[],"result":null}`))
+		},
+	}
+	cfAPI, server := newCfAPIWithMock(t, handlers)
+	defer server.Close()
+
+	r := &testReconciler{
+		client:   fakeClient,
+		scheme:   scheme,
+		recorder: record.NewFakeRecorder(100),
+		ctx:      context.Background(),
+		log:      logrtesting.New(t),
+		tunnel:   TunnelAdapter{Tunnel: tunnel},
+		cfAPI:    cfAPI,
+		cfSecret: &corev1.Secret{},
+	}
+
+	result, ok, err := cleanupTunnel(r)
+	if err != nil {
+		t.Fatalf("cleanupTunnel returned error: %v", err)
+	}
+	if !ok {
+		t.Errorf("cleanupTunnel ok = false, want true; result = %v", result)
+	}
+
+	if !clearConfigCalled {
+		t.Error("ClearTunnelConfiguration was not called")
+	}
+	if !cleanupConnCalled {
+		t.Error("CleanupTunnelConnections was not called")
+	}
+	if !deleteTunnelCalled {
+		t.Error("DeleteTunnel was not called")
+	}
+
+	// Finalizer was removed. With DeletionTimestamp set and no remaining finalizers,
+	// the fake client deletes the object entirely, so a Not Found error confirms cleanup succeeded.
+	updatedTunnel := &networkingv1alpha2.Tunnel{}
+	err = fakeClient.Get(context.Background(), types.NamespacedName{Name: "del-tun", Namespace: "default"}, updatedTunnel)
+	if err == nil {
+		// Object still exists -- check that finalizer was at least removed
+		for _, f := range updatedTunnel.Finalizers {
+			if f == tunnelFinalizer {
+				t.Error("expected tunnelFinalizer to be removed after cleanup")
+			}
+		}
+	}
+	// If Not Found, cleanup succeeded (object was garbage collected by fake client)
+}
+
+func TestCleanupTunnel_ScaleDown(t *testing.T) {
+	now := metav1.Now()
+	tunnel := newTestTunnelObj("scale-tun", "default")
+	tunnel.Finalizers = []string{tunnelFinalizer}
+	tunnel.DeletionTimestamp = &now
+
+	// Deployment with replicas=1 (not yet scaled down)
+	var replicas int32 = 1
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "scale-tun",
+			Namespace: "default",
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{tunnelLabel: "scale-tun"},
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{tunnelLabel: "scale-tun"},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "cloudflared", Image: "cloudflare/cloudflared:latest"}},
+				},
+			},
+		},
+	}
+
+	scheme := newTestScheme()
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(tunnel, dep).
+		WithStatusSubresource(&networkingv1alpha2.Tunnel{}).
+		Build()
+
+	deleteTunnelCalled := false
+	handlers := map[string]http.HandlerFunc{
+		"DELETE /accounts/acc-123/cfd_tunnel/tun-456": func(w http.ResponseWriter, r *http.Request) {
+			deleteTunnelCalled = true
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"success":true,"errors":[],"messages":[],"result":null}`))
+		},
+	}
+	cfAPI, server := newCfAPIWithMock(t, handlers)
+	defer server.Close()
+
+	r := &testReconciler{
+		client:   fakeClient,
+		scheme:   scheme,
+		recorder: record.NewFakeRecorder(100),
+		ctx:      context.Background(),
+		log:      logrtesting.New(t),
+		tunnel:   TunnelAdapter{Tunnel: tunnel},
+		cfAPI:    cfAPI,
+		cfSecret: &corev1.Secret{},
+	}
+
+	result, ok, err := cleanupTunnel(r)
+	if err != nil {
+		t.Fatalf("cleanupTunnel returned error: %v", err)
+	}
+	if ok {
+		t.Error("cleanupTunnel ok = true, want false (should requeue)")
+	}
+	if result.RequeueAfter.Seconds() != 5 {
+		t.Errorf("RequeueAfter = %v, want 5s", result.RequeueAfter)
+	}
+
+	// Deployment should be scaled to 0
+	updatedDep := &appsv1.Deployment{}
+	if err := fakeClient.Get(context.Background(), types.NamespacedName{Name: "scale-tun", Namespace: "default"}, updatedDep); err != nil {
+		t.Fatalf("failed to get updated deployment: %v", err)
+	}
+	if *updatedDep.Spec.Replicas != 0 {
+		t.Errorf("deployment replicas = %d, want 0", *updatedDep.Spec.Replicas)
+	}
+
+	// Tunnel should NOT have been deleted
+	if deleteTunnelCalled {
+		t.Error("DeleteTunnel should not be called before scale-down completes")
+	}
+}
+
+func TestUpdateTunnelStatus(t *testing.T) {
+	tunnel := newTestTunnelObj("status-tun", "default")
+	tunnel.Status = networkingv1alpha2.TunnelStatus{} // Start with empty status
+
+	scheme := newTestScheme()
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(tunnel).
+		WithStatusSubresource(&networkingv1alpha2.Tunnel{}).
+		Build()
+
+	// Mock CF server for ValidateAll
+	handlers := map[string]http.HandlerFunc{
+		"GET /accounts/acc-123": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"success":true,"errors":[],"messages":[],"result":{"id":"acc-123","name":"test-account"}}`))
+		},
+		"GET /accounts/acc-123/cfd_tunnel/tun-456": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"success":true,"errors":[],"messages":[],"result":{"id":"tun-456","name":"test-tunnel"}}`))
+		},
+		"GET /zones": func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"success":true,"errors":[],"messages":[],"result":[{"id":"zone-789","name":"example.com"}],"result_info":{"page":1,"per_page":50,"total_pages":1,"count":1,"total_count":1}}`))
+		},
+	}
+	cfAPI, server := newCfAPIWithMock(t, handlers)
+	defer server.Close()
+
+	r := &testReconciler{
+		client:   fakeClient,
+		scheme:   scheme,
+		recorder: record.NewFakeRecorder(100),
+		ctx:      context.Background(),
+		log:      logrtesting.New(t),
+		tunnel:   TunnelAdapter{Tunnel: tunnel},
+		cfAPI:    cfAPI,
+		cfSecret: &corev1.Secret{},
+	}
+
+	err := updateTunnelStatus(r)
+	if err != nil {
+		t.Fatalf("updateTunnelStatus returned error: %v", err)
+	}
+
+	// Check status fields on the tunnel object
+	updatedTunnel := &networkingv1alpha2.Tunnel{}
+	if err := fakeClient.Get(context.Background(), types.NamespacedName{Name: "status-tun", Namespace: "default"}, updatedTunnel); err != nil {
+		t.Fatalf("failed to get updated tunnel: %v", err)
+	}
+
+	if updatedTunnel.Status.AccountId != "acc-123" {
+		t.Errorf("status.AccountId = %q, want %q", updatedTunnel.Status.AccountId, "acc-123")
+	}
+	if updatedTunnel.Status.TunnelId != "tun-456" {
+		t.Errorf("status.TunnelId = %q, want %q", updatedTunnel.Status.TunnelId, "tun-456")
+	}
+	if updatedTunnel.Status.TunnelName != "test-tunnel" {
+		t.Errorf("status.TunnelName = %q, want %q", updatedTunnel.Status.TunnelName, "test-tunnel")
+	}
+	if updatedTunnel.Status.ZoneId != "zone-789" {
+		t.Errorf("status.ZoneId = %q, want %q", updatedTunnel.Status.ZoneId, "zone-789")
+	}
+
+	// Check labels on the tunnel object
+	if updatedTunnel.Labels[tunnelLabel] != "status-tun" {
+		t.Errorf("label %s = %q, want %q", tunnelLabel, updatedTunnel.Labels[tunnelLabel], "status-tun")
+	}
+	if updatedTunnel.Labels[tunnelAppLabel] != "cloudflared" {
+		t.Errorf("label %s = %q, want %q", tunnelAppLabel, updatedTunnel.Labels[tunnelAppLabel], "cloudflared")
+	}
+}
