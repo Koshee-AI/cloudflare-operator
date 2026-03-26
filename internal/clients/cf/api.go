@@ -539,3 +539,85 @@ func (c *API) InsertOrUpdateTXT(fqdn, txtId, dnsId string) error {
 		return nil
 	}
 }
+
+// UpdateTunnelConfiguration pushes the ingress configuration to Cloudflare's edge API.
+// This ensures the edge has the latest routes even when cloudflared is not running.
+func (c *API) UpdateTunnelConfiguration(ingress []UnvalidatedIngressRule) error {
+	if err := c.ValidateAll(); err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+	rc := cloudflare.AccountIdentifier(c.ValidAccountId)
+
+	sdkIngress := make([]cloudflare.UnvalidatedIngressRule, len(ingress))
+	for i, rule := range ingress {
+		sdkRule := cloudflare.UnvalidatedIngressRule{
+			Hostname: rule.Hostname,
+			Service:  rule.Service,
+			Path:     rule.Path,
+		}
+		sdkRule.OriginRequest = convertOriginRequest(&rule.OriginRequest)
+		sdkIngress[i] = sdkRule
+	}
+
+	params := cloudflare.TunnelConfigurationParams{
+		TunnelID: c.ValidTunnelId,
+		Config: cloudflare.TunnelConfiguration{
+			Ingress: sdkIngress,
+		},
+	}
+
+	_, err := c.CloudflareClient.UpdateTunnelConfiguration(ctx, rc, params)
+	if err != nil {
+		c.Log.Error(err, "failed to update tunnel edge configuration", "tunnelId", c.ValidTunnelId)
+		return err
+	}
+
+	c.Log.Info("Updated tunnel edge configuration", "tunnelId", c.ValidTunnelId, "ruleCount", len(ingress))
+	return nil
+}
+
+// ClearTunnelConfiguration pushes an empty configuration (catch-all 404 only) to the edge.
+func (c *API) ClearTunnelConfiguration() error {
+	return c.UpdateTunnelConfiguration([]UnvalidatedIngressRule{
+		{Service: "http_status:404"},
+	})
+}
+
+// convertOriginRequest converts the local OriginRequestConfig to the cloudflare-go SDK type.
+func convertOriginRequest(local *OriginRequestConfig) *cloudflare.OriginRequestConfig {
+	if local == nil {
+		return nil
+	}
+	sdk := &cloudflare.OriginRequestConfig{
+		NoTLSVerify:            local.NoTLSVerify,
+		NoHappyEyeballs:        local.NoHappyEyeballs,
+		KeepAliveConnections:   local.KeepAliveConnections,
+		HTTPHostHeader:         local.HTTPHostHeader,
+		OriginServerName:       local.OriginServerName,
+		CAPool:                 local.CAPool,
+		DisableChunkedEncoding: local.DisableChunkedEncoding,
+		BastionMode:            local.BastionMode,
+		ProxyAddress:           local.ProxyAddress,
+		ProxyPort:              local.ProxyPort,
+		ProxyType:              local.ProxyType,
+		Http2Origin:            local.Http2Origin,
+	}
+
+	// Convert *time.Duration to *cloudflare.TunnelDuration
+	if local.ConnectTimeout != nil {
+		sdk.ConnectTimeout = &cloudflare.TunnelDuration{Duration: *local.ConnectTimeout}
+	}
+	if local.TLSTimeout != nil {
+		sdk.TLSTimeout = &cloudflare.TunnelDuration{Duration: *local.TLSTimeout}
+	}
+	if local.TCPKeepAlive != nil {
+		sdk.TCPKeepAlive = &cloudflare.TunnelDuration{Duration: *local.TCPKeepAlive}
+	}
+	if local.KeepAliveTimeout != nil {
+		sdk.KeepAliveTimeout = &cloudflare.TunnelDuration{Duration: *local.KeepAliveTimeout}
+	}
+
+	return sdk
+}

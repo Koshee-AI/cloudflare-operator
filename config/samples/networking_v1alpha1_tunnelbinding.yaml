@@ -12,3 +12,9 @@ subjects:
 tunnelRef:
   kind: ClusterTunnel
   name: clustertunnel-sample
+  # Optional: reference a Secret in the operator namespace for Cloudflare API credentials.
+  # Prevents finalizer deadlocks during namespace deletion when the namespace-scoped
+  # Secret is deleted before the TunnelBinding finalizer runs.
+  # credentialSecretRef:
+  #   name: cloudflare-api-credentials
+  #   namespace: cloudflare-operator-system

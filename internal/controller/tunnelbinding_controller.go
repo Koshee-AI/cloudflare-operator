@@ -614,6 +614,12 @@ func (r *TunnelBindingReconciler) configureCloudflareDaemon() error {
 
 	config.Ingress = finalIngresses
 
+	// Sync configuration to Cloudflare edge — best-effort, do not block on failure.
+	// This ensures edge routes are updated even when cloudflared is not running.
+	if err := r.cfAPI.UpdateTunnelConfiguration(finalIngresses); err != nil {
+		r.log.Error(err, "failed to sync configuration to Cloudflare edge, cloudflared will sync on next restart")
+	}
+
 	return r.setConfigMapConfiguration(config)
 }
 

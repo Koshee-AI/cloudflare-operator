@@ -195,6 +195,12 @@ func cleanupTunnel(r GenericTunnelReconciler) (ctrl.Result, bool, error) {
 				r.GetRecorder().Event(r.GetTunnel().GetObject(), corev1.EventTypeWarning, "DNSCleanupPartial", "Some DNS records could not be cleaned up")
 			}
 
+			// Clear edge configuration before deleting tunnel.
+			// Redundant since tunnel deletion removes routes, but provides defense-in-depth.
+			if err := r.GetCfAPI().ClearTunnelConfiguration(); err != nil {
+				r.GetLog().Error(err, "failed to clear edge configuration, proceeding with tunnel deletion")
+			}
+
 			if err := r.GetCfAPI().DeleteTunnel(); err != nil {
 				r.GetRecorder().Event(r.GetTunnel().GetObject(), corev1.EventTypeWarning, "FailedDeleting", "Tunnel deletion failed")
 				return ctrl.Result{}, false, err
@@ -471,6 +477,13 @@ func rebuildTunnelConfig(r GenericTunnelReconciler) error {
 	})
 
 	config.Ingress = finalIngresses
+
+	// Sync configuration to Cloudflare edge — best-effort
+	if r.GetCfAPI() != nil {
+		if err := r.GetCfAPI().UpdateTunnelConfiguration(finalIngresses); err != nil {
+			r.GetLog().Error(err, "failed to sync configuration to Cloudflare edge during tunnel config rebuild")
+		}
+	}
 
 	// Marshal and update configmap
 	configBytes, err := yaml.Marshal(config)
