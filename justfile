@@ -186,3 +186,36 @@ clean:
 
 # Remove everything (cluster + artifacts)
 clean-all: delete-cluster clean
+
+# ============================================================
+# E2E TESTING
+# ============================================================
+
+# Build and push the mock CF server image
+build-cfmock:
+    docker build -t {{registry}}/cfmock-server:dev -f test/e2e/Dockerfile.cfmock .
+    docker push {{registry}}/cfmock-server:dev
+
+# Deploy the mock CF server to the cluster
+deploy-cfmock: build-cfmock
+    kubectl apply -f test/e2e/manifests/cfmock-deployment.yaml --context k3d-{{cluster_name}}
+    kubectl wait --for=condition=Available deployment/cfmock-server \
+      -n cloudflare-operator-system --timeout=60s --context k3d-{{cluster_name}}
+
+# Patch the operator to use the mock CF server
+patch-operator-cfmock:
+    kubectl set env deployment/cloudflare-operator-controller-manager \
+      -n cloudflare-operator-system \
+      -c manager \
+      CLOUDFLARE_API_BASE_URL=http://cfmock-server.cloudflare-operator-system:8080/client/v4 \
+      --context k3d-{{cluster_name}}
+    kubectl rollout status deployment/cloudflare-operator-controller-manager \
+      -n cloudflare-operator-system --timeout=60s --context k3d-{{cluster_name}}
+
+# Run e2e tests (requires cluster + operator + cfmock deployed)
+e2e: deploy-cfmock patch-operator-cfmock
+    go test ./test/e2e/ -v -timeout 5m
+
+# Full e2e setup and run
+e2e-full: dev deploy-cfmock patch-operator-cfmock
+    go test ./test/e2e/ -v -timeout 5m

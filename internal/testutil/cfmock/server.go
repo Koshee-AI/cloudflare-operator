@@ -84,16 +84,28 @@ type Server struct {
 
 // NewServer creates a new mock Cloudflare API server and starts it.
 func NewServer() *Server {
-	s := &Server{
+	s := newServerState()
+	s.HTTPServer = httptest.NewServer(http.HandlerFunc(s.handler))
+	s.URL = s.HTTPServer.URL
+	return s
+}
+
+// newServerState creates a Server with initialized maps but no HTTP server.
+func newServerState() *Server {
+	return &Server{
 		Tunnels:       make(map[string]Tunnel),
 		DNSRecords:    make(map[string]DNSRecord),
 		Zones:         make(map[string]Zone),
 		Accounts:      make(map[string]Account),
 		TunnelConfigs: make(map[string]TunnelConfig),
 	}
-	s.HTTPServer = httptest.NewServer(http.HandlerFunc(s.handler))
-	s.URL = s.HTTPServer.URL
-	return s
+}
+
+// NewHandler creates a Server and returns its http.Handler for use in standalone HTTP servers.
+// The returned Server can be used to pre-configure accounts, zones, etc. before serving.
+func NewHandler() (*Server, http.Handler) {
+	s := newServerState()
+	return s, http.HandlerFunc(s.handler)
 }
 
 // Close shuts down the mock server.
@@ -189,6 +201,13 @@ func (s *Server) nextID(prefix string, counter *int) string {
 }
 
 func (s *Server) handler(w http.ResponseWriter, r *http.Request) {
+	// Health check endpoint — no locking needed
+	if r.URL.Path == "/health" {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ok"}`))
+		return
+	}
+
 	s.mu.Lock()
 
 	// Read body

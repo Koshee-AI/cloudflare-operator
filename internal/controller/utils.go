@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/adyanth/cloudflare-operator/internal/clients/cf"
 
@@ -43,6 +44,12 @@ const (
 // testCfClientOpts allows tests to inject cloudflare.Option values (e.g., BaseURL for mock servers)
 // into all controllers without modifying their initStruct methods.
 var testCfClientOpts []cloudflare.Option
+
+func init() {
+	if baseURL := os.Getenv("CLOUDFLARE_API_BASE_URL"); baseURL != "" {
+		testCfClientOpts = append(testCfClientOpts, cloudflare.BaseURL(baseURL))
+	}
+}
 
 var tunnelValidProtoMap = map[string]bool{
 	tunnelProtoHTTP:  true,

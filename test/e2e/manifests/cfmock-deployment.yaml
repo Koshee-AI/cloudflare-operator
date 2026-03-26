@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cfmock-server
+  namespace: cloudflare-operator-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cfmock-server
+  template:
+    metadata:
+      labels:
+        app: cfmock-server
+    spec:
+      containers:
+        - name: cfmock
+          image: koshee-cf-operator-registry.localhost:16050/cfmock-server:dev
+          ports:
+            - containerPort: 8080
+          env:
+            - name: PORT
+              value: "8080"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cfmock-server
+  namespace: cloudflare-operator-system
+spec:
+  selector:
+    app: cfmock-server
+  ports:
+    - port: 8080
+      targetPort: 8080
