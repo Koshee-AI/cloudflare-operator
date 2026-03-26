@@ -129,6 +129,67 @@ func TestUpgradeTunnel(t *testing.T) {
 	}
 }
 
+func TestTunnelBindingDeepCopy_WithCredentialSecretRef(t *testing.T) {
+	original := &v1alpha1.TunnelBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "binding-1",
+			Namespace: "default",
+		},
+		Subjects: []v1alpha1.TunnelBindingSubject{
+			{Kind: "Service", Name: "web"},
+		},
+		TunnelRef: v1alpha1.TunnelRef{
+			Kind: "Tunnel",
+			Name: "my-tunnel",
+			CredentialSecretRef: &v1alpha1.SecretReference{
+				Name:      "my-secret",
+				Namespace: "other-ns",
+			},
+		},
+	}
+
+	copied := original.DeepCopy()
+
+	if copied.TunnelRef.CredentialSecretRef == nil {
+		t.Fatal("expected CredentialSecretRef to be non-nil in copy")
+	}
+	if copied.TunnelRef.CredentialSecretRef.Name != "my-secret" {
+		t.Errorf("expected Name=%q, got %q", "my-secret", copied.TunnelRef.CredentialSecretRef.Name)
+	}
+	if copied.TunnelRef.CredentialSecretRef.Namespace != "other-ns" {
+		t.Errorf("expected Namespace=%q, got %q", "other-ns", copied.TunnelRef.CredentialSecretRef.Namespace)
+	}
+
+	// Mutate the original and confirm the copy is independent
+	original.TunnelRef.CredentialSecretRef.Name = "changed-secret"
+	if copied.TunnelRef.CredentialSecretRef.Name != "my-secret" {
+		t.Errorf("copy was affected by mutation of original: got Name=%q", copied.TunnelRef.CredentialSecretRef.Name)
+	}
+}
+
+func TestTunnelBindingDeepCopy_NilCredentialSecretRef(t *testing.T) {
+	original := &v1alpha1.TunnelBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "binding-2",
+			Namespace: "default",
+		},
+		Subjects: []v1alpha1.TunnelBindingSubject{
+			{Kind: "Service", Name: "web"},
+		},
+		TunnelRef: v1alpha1.TunnelRef{
+			Kind:                "Tunnel",
+			Name:                "my-tunnel",
+			CredentialSecretRef: nil,
+		},
+	}
+
+	copied := original.DeepCopy()
+
+	if copied.TunnelRef.CredentialSecretRef != nil {
+		t.Errorf("expected CredentialSecretRef to be nil in copy, got %+v", copied.TunnelRef.CredentialSecretRef)
+	}
+}
+
 func TestDowngradeTunnel(t *testing.T) {
 	// Convert
 	filledNewTunnel := sampleFilledNewTunnel.DeepCopy()
