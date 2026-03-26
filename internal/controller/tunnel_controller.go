@@ -110,7 +110,7 @@ func (r *TunnelReconciler) initStruct(ctx context.Context, tunnel Tunnel) error 
 
 	var err error
 
-	if r.cfAPI, r.cfSecret, err = getAPIDetails(r.ctx, r.Client, r.log, r.tunnel.GetSpec(), r.tunnel.GetStatus(), r.tunnel.GetNamespace()); err != nil {
+	if r.cfAPI, r.cfSecret, err = getAPIDetails(r.ctx, r.Client, r.log, r.tunnel.GetSpec(), r.tunnel.GetStatus(), r.tunnel.GetNamespace(), nil); err != nil {
 		r.log.Error(err, "unable to get API details")
 		r.Recorder.Event(r.tunnel.GetObject(), corev1.EventTypeWarning, "ErrSpecSecret", "Error reading Secret to configure API")
 		return err

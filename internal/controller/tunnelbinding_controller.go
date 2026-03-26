@@ -92,7 +92,7 @@ func (r *TunnelBindingReconciler) initStruct(ctx context.Context, tunnelBinding 
 
 		r.fallbackTarget = clusterTunnel.Spec.FallbackTarget
 
-		if r.cfAPI, _, err = getAPIDetails(r.ctx, r.Client, r.log, clusterTunnel.Spec, clusterTunnel.Status, r.Namespace); err != nil {
+		if r.cfAPI, _, err = getAPIDetails(r.ctx, r.Client, r.log, clusterTunnel.Spec, clusterTunnel.Status, r.Namespace, r.binding.TunnelRef.CredentialSecretRef); err != nil {
 			r.log.Error(err, "unable to get API details")
 			r.Recorder.Event(tunnelBinding, corev1.EventTypeWarning, "ErrApiConfig", "Error getting API details")
 			return err
@@ -108,7 +108,7 @@ func (r *TunnelBindingReconciler) initStruct(ctx context.Context, tunnelBinding 
 
 		r.fallbackTarget = tunnel.Spec.FallbackTarget
 
-		if r.cfAPI, _, err = getAPIDetails(r.ctx, r.Client, r.log, tunnel.Spec, tunnel.Status, r.binding.Namespace); err != nil {
+		if r.cfAPI, _, err = getAPIDetails(r.ctx, r.Client, r.log, tunnel.Spec, tunnel.Status, r.binding.Namespace, r.binding.TunnelRef.CredentialSecretRef); err != nil {
 			r.log.Error(err, "unable to get API details")
 			r.Recorder.Event(tunnelBinding, corev1.EventTypeWarning, "ErrApiConfig", "Error getting API details")
 			return err
@@ -139,6 +139,7 @@ func (r *TunnelBindingReconciler) initStruct(ctx context.Context, tunnelBinding 
 // +kubebuilder:rbac:groups=networking.cfargotunnel.com,resources=clustertunnels/status,verbs=get
 // +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;update;patch
+// +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 

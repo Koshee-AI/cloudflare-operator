@@ -95,6 +95,16 @@ type TunnelBindingSubjectSpec struct {
 	ProxyType string `json:"proxyType,omitempty"`
 }
 
+// SecretReference is a reference to a Secret in a specific namespace
+type SecretReference struct {
+	// Name of the Secret
+	// +kubebuilder:validation:Required
+	Name string `json:"name"`
+	// Namespace of the Secret
+	// +kubebuilder:validation:Required
+	Namespace string `json:"namespace"`
+}
+
 // TunnelRef defines the Tunnel TunnelBinding connects to
 type TunnelRef struct {
 	// Kind can be Tunnel or ClusterTunnel
@@ -108,6 +118,13 @@ type TunnelRef struct {
 	// +kubebuilder:validation:Optional
 	// DisableDNSUpdates disables the DNS updates on Cloudflare, just managing the configs. Assumes the DNS entries are manually added.
 	DisableDNSUpdates bool `json:"disableDNSUpdates"`
+
+	// +kubebuilder:validation:Optional
+	// CredentialSecretRef is an optional reference to a Secret in a different namespace
+	// containing Cloudflare API credentials. When set, this Secret is used instead of the
+	// Secret referenced by the Tunnel spec. This prevents finalizer deadlocks during
+	// namespace deletion when the namespace-scoped Secret is deleted before the finalizer runs.
+	CredentialSecretRef *SecretReference `json:"credentialSecretRef,omitempty"`
 }
 
 // ServiceInfo stores the Hostname and Target for each service

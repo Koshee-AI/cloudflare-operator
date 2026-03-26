@@ -27,3 +27,8 @@ testbin/*
 # used for development
 secrets
 dist
+
+# Project planning and AI context
+TODO.md
+CLAUDE.md
+plans/

@@ -6,6 +6,7 @@ import (
 
 	"github.com/adyanth/cloudflare-operator/internal/clients/cf"
 
+	networkingv1alpha1 "github.com/adyanth/cloudflare-operator/api/v1alpha1"
 	"github.com/cloudflare/cloudflare-go"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -56,15 +57,24 @@ func getAPIDetails(
 	tunnelSpec networkingv1alpha2.TunnelSpec,
 	tunnelStatus networkingv1alpha2.TunnelStatus,
 	namespace string,
+	secretOverride *networkingv1alpha1.SecretReference,
 ) (
 	*cf.API,
 	*corev1.Secret,
 	error,
 ) {
+	// Determine secret coordinates — use override if provided, else tunnel spec
+	secretName := tunnelSpec.Cloudflare.Secret
+	secretNamespace := namespace
+	if secretOverride != nil {
+		secretName = secretOverride.Name
+		secretNamespace = secretOverride.Namespace
+	}
+
 	// Get secret containing API token
 	cfSecret := &corev1.Secret{}
-	if err := c.Get(ctx, apitypes.NamespacedName{Name: tunnelSpec.Cloudflare.Secret, Namespace: namespace}, cfSecret); err != nil {
-		log.Error(err, "secret not found", "secret", tunnelSpec.Cloudflare.Secret)
+	if err := c.Get(ctx, apitypes.NamespacedName{Name: secretName, Namespace: secretNamespace}, cfSecret); err != nil {
+		log.Error(err, "secret not found", "secret", secretName, "namespace", secretNamespace)
 		return &cf.API{}, &corev1.Secret{}, err
 	}
 
