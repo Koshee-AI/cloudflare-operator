@@ -32,4 +32,7 @@ dist
 # Project planning and AI context
 TODO.md
 CLAUDE.md
+AGENTS.md
+STATUS.md
 plans/
+.devspace/
