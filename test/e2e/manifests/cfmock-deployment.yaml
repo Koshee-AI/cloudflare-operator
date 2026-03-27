@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: cfmock
-          image: koshee-cf-operator-registry.localhost:16050/cfmock-server:dev
+          image: koshee-dev-zot:5000/cfmock-server:dev
           ports:
             - containerPort: 8080
           env:

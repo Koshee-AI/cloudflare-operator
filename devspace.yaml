@@ -1,0 +1,25 @@
+version: v2beta1
+name: cloudflare-operator
+
+pipelines:
+  dev:
+    run: |
+      run_pipelines skupper-setup
+      just deploy
+
+  deploy:
+    run: |
+      run_pipelines skupper-setup
+      just deploy
+
+  skupper-setup:
+    run: |
+      kubectl create namespace cloudflare-operator-system --dry-run=client -o yaml | kubectl apply -f -
+      if [ -f ../infrastructure/k3d-infra/skupper/token.yaml ]; then cp ../infrastructure/k3d-infra/skupper/token.yaml skupper/token.yaml; fi
+      helm upgrade --install skupper oci://quay.io/skupper/helm/skupper \
+        --version 2.1.3 \
+        --namespace cloudflare-operator-system \
+        --wait
+      kubectl apply -f skupper/site.yaml -n cloudflare-operator-system
+      if [ -f skupper/token.yaml ]; then kubectl apply -f skupper/token.yaml -n cloudflare-operator-system; fi
+      kubectl apply -f skupper/listeners.yaml -n cloudflare-operator-system
