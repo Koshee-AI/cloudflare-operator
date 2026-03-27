@@ -2,7 +2,8 @@ set dotenv-load
 
 project := "cloudflare-operator"
 cluster_name := "koshee-cf-operator"
-registry := "koshee-cf-operator-registry.localhost:16050"
+registry_host := "localhost:9050"
+registry := "koshee-dev-zot:5000"
 image := registry + "/" + project + ":dev"
 
 # ============================================================
@@ -85,11 +86,11 @@ lint-fix:
 
 # Build the operator container image
 docker-build:
-    docker build -t {{image}} .
+    docker build -t {{registry_host}}/{{project}}:dev .
 
 # Push the operator image to the k3d registry
 docker-push:
-    docker push {{image}}
+    skopeo copy --tmpdir /tmp --dest-tls-verify=false docker-daemon:{{registry_host}}/{{project}}:dev docker://{{registry_host}}/{{project}}:dev
 
 # Build and push in one step
 image: docker-build docker-push
@@ -137,15 +138,25 @@ uninstall-crds:
 deploy: image install-crds
     #!/usr/bin/env bash
     set -e
-    cd config/manager && ../../bin/kustomize edit set image controller={{image}}
-    ../../bin/kustomize build config/default | kubectl apply --context k3d-{{cluster_name}} -f -
+    KUSTOMIZE_BIN="./bin/kustomize"
+    if [ ! -x "$KUSTOMIZE_BIN" ]; then
+      KUSTOMIZE_BIN="$(command -v kustomize)"
+    fi
+    (cd config/manager && "$KUSTOMIZE_BIN" edit set image controller={{image}})
+    "$KUSTOMIZE_BIN" build --load-restrictor LoadRestrictionsNone config/local | kubectl apply --context k3d-{{cluster_name}} -f -
     echo "Waiting for operator deployment..."
     kubectl wait --for=condition=Available deployment/cloudflare-operator-controller-manager \
       -n cloudflare-operator-system --timeout=120s --context k3d-{{cluster_name}}
 
 # Undeploy the operator from the k3d cluster
 undeploy:
-    ./bin/kustomize build config/default | kubectl delete --context k3d-{{cluster_name}} --ignore-not-found -f -
+    #!/usr/bin/env bash
+    set -e
+    KUSTOMIZE_BIN="./bin/kustomize"
+    if [ ! -x "$KUSTOMIZE_BIN" ]; then
+      KUSTOMIZE_BIN="$(command -v kustomize)"
+    fi
+    "$KUSTOMIZE_BIN" build --load-restrictor LoadRestrictionsNone config/local | kubectl delete --context k3d-{{cluster_name}} --ignore-not-found -f -
 
 # ============================================================
 # DEVELOPMENT WORKFLOW
@@ -193,8 +204,8 @@ clean-all: delete-cluster clean
 
 # Build and push the mock CF server image
 build-cfmock:
-    docker build -t {{registry}}/cfmock-server:dev -f test/e2e/Dockerfile.cfmock .
-    docker push {{registry}}/cfmock-server:dev
+    docker build -t {{registry_host}}/cfmock-server:dev -f test/e2e/Dockerfile.cfmock .
+    skopeo copy --tmpdir /tmp --dest-tls-verify=false docker-daemon:{{registry_host}}/cfmock-server:dev docker://{{registry_host}}/cfmock-server:dev
 
 # Deploy the mock CF server to the cluster
 deploy-cfmock: build-cfmock
@@ -219,3 +230,45 @@ e2e: deploy-cfmock patch-operator-cfmock
 # Full e2e setup and run
 e2e-full: dev deploy-cfmock patch-operator-cfmock
     go test ./test/e2e/ -v -timeout 5m
+
+# ============================================================
+# RUST BUILD
+# ============================================================
+
+# Build Rust operator binary
+rust-build:
+    cargo build --release
+
+# Run Rust tests
+rust-test:
+    cargo test
+
+# Run Rust linting
+rust-lint:
+    cargo clippy -- -D warnings
+
+# Check Rust formatting
+rust-fmt:
+    cargo fmt --check
+
+# Fix Rust formatting
+rust-fmt-fix:
+    cargo fmt
+
+# Generate CRD YAML from Rust types
+rust-crdgen:
+    cargo run --bin crdgen
+
+# Build Rust operator Docker image
+rust-docker-build:
+    docker build -t {{registry_host}}/{{project}}:dev -f Dockerfile.rust .
+
+# Push Rust operator Docker image
+rust-docker-push:
+    skopeo copy --tmpdir /tmp --dest-tls-verify=false docker-daemon:{{registry_host}}/{{project}}:dev docker://{{registry_host}}/{{project}}:dev
+
+# Build and push Rust image
+rust-image: rust-docker-build rust-docker-push
+
+# Run full Rust CI
+rust-ci: rust-fmt rust-lint rust-test
