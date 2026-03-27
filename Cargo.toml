@@ -1,0 +1,52 @@
+[package]
+name = "cloudflare-operator"
+version = "0.14.0"
+edition = "2024"
+authors = ["Koshee AI"]
+description = "Kubernetes operator for managing Cloudflare Tunnels and DNS records"
+license = "Apache-2.0"
+
+[[bin]]
+name = "controller"
+path = "src/main.rs"
+
+[[bin]]
+name = "crdgen"
+path = "src/bin/crdgen.rs"
+
+[dependencies]
+# Kubernetes
+kube = { version = "3", features = ["runtime", "derive", "client", "ws"] }
+k8s-openapi = { version = "0.27", features = ["v1_33"] }
+
+# Async
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+
+# HTTP client for Cloudflare API
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+md-5 = "0.10"
+base64 = "0.22"
+rand = "0.9"
+schemars = "1"
+
+[dev-dependencies]
+wiremock = "0.6"
+assert-json-diff = "2"
+tokio-test = "0.4"
