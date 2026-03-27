@@ -140,6 +140,75 @@ fn default_subject_kind() -> String {
     "Service".to_string()
 }
 
+/// OriginRequestSpec exposes the full set of cloudflared originRequest fields for per-service configuration.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OriginRequestSpec {
+    /// Timeout for establishing a new connection to the origin
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connect_timeout: Option<String>,
+
+    /// Timeout for completing a TLS handshake to the origin
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls_timeout: Option<String>,
+
+    /// TCP keepalive duration for connections to the origin
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tcp_keep_alive: Option<String>,
+
+    /// Timeout for closing an idle keepalive connection
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_alive_timeout: Option<String>,
+
+    /// Maximum number of idle keepalive connections
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_alive_connections: Option<i64>,
+
+    /// Sets the HTTP Host header for the local webserver
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http_host_header: Option<String>,
+
+    /// Hostname on the origin server certificate
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_server_name: Option<String>,
+
+    /// Path to the CA for the certificate of your origin
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ca_pool: Option<String>,
+
+    /// Disables TLS verification of the certificate presented by your origin
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub no_tls_verify: Option<bool>,
+
+    /// Attempt to connect to origin using HTTP2
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http2_origin: Option<bool>,
+
+    /// Disables chunked transfer encoding
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disable_chunked_encoding: Option<bool>,
+
+    /// Runs as jump host
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bastion_mode: Option<bool>,
+
+    /// Disable "happy eyeballs" for IPv4/v6 fallback
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub no_happy_eyeballs: Option<bool>,
+
+    /// Listen address for the proxy
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy_address: Option<String>,
+
+    /// Listen port for the proxy
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy_port: Option<u32>,
+
+    /// Valid options are 'socks' or empty
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy_type: Option<String>,
+}
+
 /// TunnelBindingSubjectSpec defines additional configuration for a TunnelBindingSubject.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -183,6 +252,10 @@ pub struct TunnelBindingSubjectSpec {
     /// ProxyType configures the proxy type
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub proxy_type: String,
+
+    /// Full originRequest configuration (takes precedence over legacy flat fields above)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_request: Option<OriginRequestSpec>,
 }
 
 fn default_proxy_address() -> String {

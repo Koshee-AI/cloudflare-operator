@@ -15,6 +15,14 @@ use cloudflare_operator::crds::cluster_tunnel::ClusterTunnel;
 use cloudflare_operator::crds::tunnel::Tunnel;
 use cloudflare_operator::crds::tunnel_binding::TunnelBinding;
 
+#[cfg(feature = "gateway-api")]
+use cloudflare_operator::controllers::gateway::{
+    gateway_class_error_policy, gateway_error_policy, httproute_error_policy,
+    reconcile_gateway, reconcile_gateway_class, reconcile_httproute,
+};
+#[cfg(feature = "gateway-api")]
+use cloudflare_operator::crds::gateway::{Gateway, GatewayClass, HTTPRoute};
+
 const DEFAULT_CLOUDFLARED_IMAGE: &str = "cloudflare/cloudflared:latest";
 const DEFAULT_CLUSTER_RESOURCE_NAMESPACE: &str = "cloudflare-operator-system";
 
@@ -44,6 +52,10 @@ async fn main() -> anyhow::Result<()> {
         cluster_resource_namespace,
         overwrite_unmanaged,
         cloudflared_image,
+        #[cfg(feature = "gateway-api")]
+        enable_gateway_api: std::env::var("ENABLE_GATEWAY_API")
+            .map(|v| v == "true" || v == "1")
+            .unwrap_or(false),
     });
 
     // Tunnel controller (namespaced)
@@ -129,18 +141,72 @@ async fn main() -> anyhow::Result<()> {
             }
         });
 
+    // Gateway API controllers (feature-gated)
+    #[cfg(feature = "gateway-api")]
+    let gateway_api_enabled = ctx.enable_gateway_api;
+
+    #[cfg(feature = "gateway-api")]
+    let gc_ctrl = async {
+        if !gateway_api_enabled { return; }
+        let gcs: Api<GatewayClass> = Api::all(client.clone());
+        Controller::new(gcs, WatcherConfig::default())
+            .run(reconcile_gateway_class, gateway_class_error_policy, ctx.clone())
+            .for_each(|res| async move {
+                match res {
+                    Ok(o) => info!(gateway_class = ?o, "GatewayClass reconciled"),
+                    Err(e) => error!(error = %e, "GatewayClass reconcile failed"),
+                }
+            })
+            .await;
+    };
+
+    #[cfg(feature = "gateway-api")]
+    let gw_ctrl = async {
+        if !gateway_api_enabled { return; }
+        let gws: Api<Gateway> = Api::all(client.clone());
+        Controller::new(gws, WatcherConfig::default())
+            .run(reconcile_gateway, gateway_error_policy, ctx.clone())
+            .for_each(|res| async move {
+                match res {
+                    Ok(o) => info!(gateway = ?o, "Gateway reconciled"),
+                    Err(e) => error!(error = %e, "Gateway reconcile failed"),
+                }
+            })
+            .await;
+    };
+
+    #[cfg(feature = "gateway-api")]
+    let hr_ctrl = async {
+        if !gateway_api_enabled { return; }
+        let routes: Api<HTTPRoute> = Api::all(client.clone());
+        Controller::new(routes, WatcherConfig::default())
+            .run(reconcile_httproute, httproute_error_policy, ctx.clone())
+            .for_each(|res| async move {
+                match res {
+                    Ok(o) => info!(httproute = ?o, "HTTPRoute reconciled"),
+                    Err(e) => error!(error = %e, "HTTPRoute reconcile failed"),
+                }
+            })
+            .await;
+    };
+
     info!("controllers started, waiting for events");
 
+    #[cfg(feature = "gateway-api")]
     tokio::select! {
-        _ = tunnel_ctrl => {
-            error!("tunnel controller exited unexpectedly");
-        }
-        _ = ct_ctrl => {
-            error!("cluster tunnel controller exited unexpectedly");
-        }
-        _ = binding_ctrl => {
-            error!("tunnel binding controller exited unexpectedly");
-        }
+        _ = tunnel_ctrl => { error!("tunnel controller exited unexpectedly"); }
+        _ = ct_ctrl => { error!("cluster tunnel controller exited unexpectedly"); }
+        _ = binding_ctrl => { error!("tunnel binding controller exited unexpectedly"); }
+        _ = gc_ctrl => { error!("gateway class controller exited unexpectedly"); }
+        _ = gw_ctrl => { error!("gateway controller exited unexpectedly"); }
+        _ = hr_ctrl => { error!("httproute controller exited unexpectedly"); }
+    }
+
+    #[cfg(not(feature = "gateway-api"))]
+    tokio::select! {
+        _ = tunnel_ctrl => { error!("tunnel controller exited unexpectedly"); }
+        _ = ct_ctrl => { error!("cluster tunnel controller exited unexpectedly"); }
+        _ = binding_ctrl => { error!("tunnel binding controller exited unexpectedly"); }
     }
 
     Ok(())

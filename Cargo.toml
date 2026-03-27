@@ -46,6 +46,10 @@ base64 = "0.22"
 rand = "0.9"
 schemars = "1"
 
+[features]
+default = []
+gateway-api = []
+
 [dev-dependencies]
 wiremock = "0.6"
 assert-json-diff = "2"

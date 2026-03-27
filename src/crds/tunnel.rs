@@ -46,6 +46,10 @@ pub struct TunnelSpec {
     /// New tunnel object
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub new_tunnel: Option<NewTunnel>,
+
+    /// CloudflaredImage overrides the default cloudflared container image
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cloudflared_image: Option<String>,
 }
 
 /// TunnelStatus defines the observed state of Tunnel.

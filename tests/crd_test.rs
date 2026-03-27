@@ -33,6 +33,7 @@ fn test_tunnel_spec_serialization() {
             name: "my-tunnel".to_string(),
         }),
         new_tunnel: None,
+        cloudflared_image: None,
     };
 
     let val = serde_json::to_value(&spec).unwrap();

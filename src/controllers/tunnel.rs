@@ -94,6 +94,7 @@ impl TunnelLike for ClusterTunnel {
             cloudflare: cs.cloudflare.clone(),
             existing_tunnel: cs.existing_tunnel.clone(),
             new_tunnel: cs.new_tunnel.clone(),
+            cloudflared_image: cs.cloudflared_image.clone(),
         }
     }
 
@@ -390,10 +391,15 @@ pub async fn reconcile_tunnel<T: TunnelLike>(
 
     // 8. Build and apply Deployment
     let config_hash = compute_md5(&applied_config_yaml);
+    let effective_image = spec
+        .cloudflared_image
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(&ctx.cloudflared_image);
     let dep = build_deployment(
         &name,
         &ns,
-        &ctx.cloudflared_image,
+        effective_image,
         &spec.protocol,
         &spec.origin_ca_pool,
         &config_hash,

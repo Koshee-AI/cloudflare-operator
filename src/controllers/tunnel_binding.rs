@@ -16,7 +16,7 @@ use crate::config::cloudflared::{Configuration, OriginRequestConfig, Unvalidated
 use crate::crds::cluster_tunnel::ClusterTunnel;
 use crate::crds::tunnel::Tunnel;
 use crate::crds::tunnel_binding::{TunnelBinding, TunnelBindingStatus};
-use crate::crds::types::{CloudflareDetails, ServiceInfo};
+use crate::crds::types::{CloudflareDetails, ServiceInfo, TunnelBindingSubjectSpec};
 use crate::error::Error;
 
 use super::context::Context;
@@ -676,22 +676,7 @@ async fn configure_cloudflare_daemon(
                     status.services[i].target.clone()
                 };
 
-                let mut origin_req = OriginRequestConfig::default();
-                origin_req.no_tls_verify = Some(subject.spec.no_tls_verify);
-                origin_req.http2_origin = Some(subject.spec.http2_origin);
-                if !subject.spec.proxy_address.is_empty() {
-                    origin_req.proxy_address = Some(subject.spec.proxy_address.clone());
-                }
-                if subject.spec.proxy_port != 0 {
-                    origin_req.proxy_port = Some(subject.spec.proxy_port);
-                }
-                if !subject.spec.proxy_type.is_empty() {
-                    origin_req.proxy_type = Some(subject.spec.proxy_type.clone());
-                }
-                if !subject.spec.ca_pool.is_empty() {
-                    origin_req.ca_pool =
-                        Some(format!("/etc/cloudflared/certs/{}", subject.spec.ca_pool));
-                }
+                let origin_req = build_origin_request_config(&subject.spec);
 
                 final_ingresses.push(UnvalidatedIngressRule {
                     hostname: Some(status.services[i].hostname.clone()),
@@ -796,6 +781,86 @@ async fn configure_cloudflare_daemon(
         "configmap updated from tunnel bindings"
     );
     Ok(())
+}
+
+// ── Build OriginRequestConfig from subject spec ─────────────────────────
+
+/// Builds an OriginRequestConfig by first applying legacy flat fields from
+/// TunnelBindingSubjectSpec, then overlaying any fields set in the new
+/// origin_request struct (which takes precedence).
+fn build_origin_request_config(spec: &TunnelBindingSubjectSpec) -> OriginRequestConfig {
+    // Start with legacy flat fields
+    let mut cfg = OriginRequestConfig {
+        no_tls_verify: Some(spec.no_tls_verify),
+        http2_origin: Some(spec.http2_origin),
+        ..Default::default()
+    };
+    if !spec.proxy_address.is_empty() {
+        cfg.proxy_address = Some(spec.proxy_address.clone());
+    }
+    if spec.proxy_port != 0 {
+        cfg.proxy_port = Some(spec.proxy_port);
+    }
+    if !spec.proxy_type.is_empty() {
+        cfg.proxy_type = Some(spec.proxy_type.clone());
+    }
+    if !spec.ca_pool.is_empty() {
+        cfg.ca_pool = Some(format!("/etc/cloudflared/certs/{}", spec.ca_pool));
+    }
+
+    // Overlay with origin_request fields (takes precedence over legacy)
+    if let Some(or) = &spec.origin_request {
+        if or.connect_timeout.is_some() {
+            cfg.connect_timeout = or.connect_timeout.clone();
+        }
+        if or.tls_timeout.is_some() {
+            cfg.tls_timeout = or.tls_timeout.clone();
+        }
+        if or.tcp_keep_alive.is_some() {
+            cfg.tcp_keep_alive = or.tcp_keep_alive.clone();
+        }
+        if or.keep_alive_timeout.is_some() {
+            cfg.keep_alive_timeout = or.keep_alive_timeout.clone();
+        }
+        if or.keep_alive_connections.is_some() {
+            cfg.keep_alive_connections = or.keep_alive_connections;
+        }
+        if or.http_host_header.is_some() {
+            cfg.http_host_header = or.http_host_header.clone();
+        }
+        if or.origin_server_name.is_some() {
+            cfg.origin_server_name = or.origin_server_name.clone();
+        }
+        if or.ca_pool.is_some() {
+            cfg.ca_pool = or.ca_pool.clone();
+        }
+        if or.no_tls_verify.is_some() {
+            cfg.no_tls_verify = or.no_tls_verify;
+        }
+        if or.http2_origin.is_some() {
+            cfg.http2_origin = or.http2_origin;
+        }
+        if or.disable_chunked_encoding.is_some() {
+            cfg.disable_chunked_encoding = or.disable_chunked_encoding;
+        }
+        if or.bastion_mode.is_some() {
+            cfg.bastion_mode = or.bastion_mode;
+        }
+        if or.no_happy_eyeballs.is_some() {
+            cfg.no_happy_eyeballs = or.no_happy_eyeballs;
+        }
+        if or.proxy_address.is_some() {
+            cfg.proxy_address = or.proxy_address.clone();
+        }
+        if or.proxy_port.is_some() {
+            cfg.proxy_port = or.proxy_port;
+        }
+        if or.proxy_type.is_some() {
+            cfg.proxy_type = or.proxy_type.clone();
+        }
+    }
+
+    cfg
 }
 
 // ── MD5 helper ──────────────────────────────────────────────────────────

@@ -14,4 +14,8 @@ pub struct Context {
 
     /// Image to use for the cloudflared container
     pub cloudflared_image: String,
+
+    /// Whether the Gateway API controllers are enabled at runtime
+    #[cfg(feature = "gateway-api")]
+    pub enable_gateway_api: bool,
 }
