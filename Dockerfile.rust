@@ -19,8 +19,8 @@ RUN touch src/main.rs src/bin/crdgen.rs src/lib.rs && cargo build --release
 # Alpine runtime — tiny, has shell for debugging if needed
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates && adduser -D -u 65532 nonroot
-COPY --from=builder /app/target/release/controller /controller
+COPY --from=builder /app/target/release/controller /manager
 COPY --from=builder /app/target/release/crdgen /crdgen
 USER 65532
 
-ENTRYPOINT ["/controller"]
+ENTRYPOINT ["/manager"]

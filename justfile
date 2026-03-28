@@ -281,3 +281,28 @@ rust-image: rust-docker-build rust-docker-push
 
 # Run full Rust CI
 rust-ci: rust-fmt rust-lint rust-test
+
+# Deploy Rust operator using existing kustomize manifests
+rust-deploy: rust-docker-build install-crds
+    #!/usr/bin/env bash
+    set -e
+    KUSTOMIZE_BIN="./bin/kustomize"
+    if [ ! -x "$KUSTOMIZE_BIN" ]; then
+      KUSTOMIZE_BIN="$(command -v kustomize)"
+    fi
+    k3d image import {{registry_host}}/{{project}}:dev -c {{cluster_name}}
+    (cd config/manager && "$KUSTOMIZE_BIN" edit set image controller={{registry_host}}/{{project}}:dev)
+    "$KUSTOMIZE_BIN" build --load-restrictor LoadRestrictionsNone config/local | \
+      KUBECONFIG={{kubeconfig}} kubectl apply --context {{kube_ctx}} -f -
+    echo "Waiting for operator deployment..."
+    KUBECONFIG={{kubeconfig}} kubectl wait --for=condition=Available \
+      deployment/cloudflare-operator-controller-manager \
+      -n cloudflare-operator-system --timeout=120s --context {{kube_ctx}}
+
+# Rebuild and redeploy Rust operator
+rust-reload: rust-docker-build
+    k3d image import {{registry_host}}/{{project}}:dev -c {{cluster_name}}
+    KUBECONFIG={{kubeconfig}} kubectl rollout restart deployment/cloudflare-operator-controller-manager \
+      -n cloudflare-operator-system --context {{kube_ctx}}
+    KUBECONFIG={{kubeconfig}} kubectl rollout status deployment/cloudflare-operator-controller-manager \
+      -n cloudflare-operator-system --context {{kube_ctx}} --timeout=60s

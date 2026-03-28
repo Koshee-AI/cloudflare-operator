@@ -190,10 +190,24 @@ async fn main() -> anyhow::Result<()> {
             .await;
     };
 
+    // Health/readiness probe server on :8081
+    let health_server = async {
+        use tokio::io::AsyncWriteExt;
+        let listener = tokio::net::TcpListener::bind("0.0.0.0:8081").await.unwrap();
+        info!("health probe server listening on :8081");
+        loop {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok";
+                let _ = stream.write_all(response.as_bytes()).await;
+            }
+        }
+    };
+
     info!("controllers started, waiting for events");
 
     #[cfg(feature = "gateway-api")]
     tokio::select! {
+        _ = health_server => { error!("health server exited unexpectedly"); }
         _ = tunnel_ctrl => { error!("tunnel controller exited unexpectedly"); }
         _ = ct_ctrl => { error!("cluster tunnel controller exited unexpectedly"); }
         _ = binding_ctrl => { error!("tunnel binding controller exited unexpectedly"); }
@@ -204,6 +218,7 @@ async fn main() -> anyhow::Result<()> {
 
     #[cfg(not(feature = "gateway-api"))]
     tokio::select! {
+        _ = health_server => { error!("health server exited unexpectedly"); }
         _ = tunnel_ctrl => { error!("tunnel controller exited unexpectedly"); }
         _ = ct_ctrl => { error!("cluster tunnel controller exited unexpectedly"); }
         _ = binding_ctrl => { error!("tunnel binding controller exited unexpectedly"); }
