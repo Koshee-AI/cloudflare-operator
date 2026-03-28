@@ -87,7 +87,11 @@ pub struct AccessTunnelSpec {
     pub target: AccessTunnelTarget,
 
     /// ServiceToken defines the access auth if needed
-    #[serde(default, skip_serializing_if = "Option::is_none", rename = "serviceToken")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "serviceToken"
+    )]
     pub service_token: Option<AccessTunnelServiceToken>,
 }
 

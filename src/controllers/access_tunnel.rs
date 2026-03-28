@@ -6,7 +6,7 @@ use k8s_openapi::api::apps::v1::{Deployment, DeploymentSpec};
 use k8s_openapi::api::core::v1::{
     Affinity, Capabilities, Container, ContainerPort, NodeAffinity, NodeSelector,
     NodeSelectorRequirement, NodeSelectorTerm, PodSecurityContext, PodSpec, PodTemplateSpec,
-    Secret, SeccompProfile, SecurityContext, Service, ServicePort, ServiceSpec,
+    SeccompProfile, Secret, SecurityContext, Service, ServicePort, ServiceSpec,
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{LabelSelector, ObjectMeta, OwnerReference};
 use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;

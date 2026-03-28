@@ -41,7 +41,10 @@ impl CfClient {
     pub fn new(api_token: &str, base_url: Option<&str>) -> Self {
         Self {
             http: reqwest::Client::new(),
-            base_url: base_url.unwrap_or(DEFAULT_BASE_URL).trim_end_matches('/').to_string(),
+            base_url: base_url
+                .unwrap_or(DEFAULT_BASE_URL)
+                .trim_end_matches('/')
+                .to_string(),
             auth: AuthMode::Token(api_token.to_string()),
             account_id: String::new(),
             tunnel_id: String::new(),
@@ -55,7 +58,10 @@ impl CfClient {
     pub fn new_with_key(api_key: &str, email: &str, base_url: Option<&str>) -> Self {
         Self {
             http: reqwest::Client::new(),
-            base_url: base_url.unwrap_or(DEFAULT_BASE_URL).trim_end_matches('/').to_string(),
+            base_url: base_url
+                .unwrap_or(DEFAULT_BASE_URL)
+                .trim_end_matches('/')
+                .to_string(),
             auth: AuthMode::Key {
                 api_key: api_key.to_string(),
                 email: email.to_string(),
@@ -95,8 +101,11 @@ impl CfClient {
     /// Parse a single-result Cloudflare response envelope, returning the result or an error.
     fn parse_response<T>(resp: CfResponse<T>) -> Result<T> {
         if !resp.success {
-            let msgs: Vec<String> =
-                resp.errors.iter().map(|e| format!("[{}] {}", e.code, e.message)).collect();
+            let msgs: Vec<String> = resp
+                .errors
+                .iter()
+                .map(|e| format!("[{}] {}", e.code, e.message))
+                .collect();
             return Err(Error::Cloudflare(msgs.join("; ")));
         }
         resp.result
@@ -106,8 +115,11 @@ impl CfClient {
     /// Parse a list-result Cloudflare response envelope.
     fn parse_list_response<T>(resp: CfListResponse<T>) -> Result<Vec<T>> {
         if !resp.success {
-            let msgs: Vec<String> =
-                resp.errors.iter().map(|e| format!("[{}] {}", e.code, e.message)).collect();
+            let msgs: Vec<String> = resp
+                .errors
+                .iter()
+                .map(|e| format!("[{}] {}", e.code, e.message))
+                .collect();
             return Err(Error::Cloudflare(msgs.join("; ")));
         }
         Ok(resp.result)
@@ -119,9 +131,7 @@ impl CfClient {
         method: &str,
         request: reqwest::RequestBuilder,
     ) -> Result<reqwest::Response> {
-        let timer = CF_API_DURATION
-            .with_label_values(&[method])
-            .start_timer();
+        let timer = CF_API_DURATION.with_label_values(&[method]).start_timer();
         let result = request.send().await;
         timer.observe_duration();
         match &result {
@@ -131,14 +141,10 @@ impl CfClient {
                 } else {
                     "error"
                 };
-                CF_API_REQUESTS
-                    .with_label_values(&[method, status])
-                    .inc();
+                CF_API_REQUESTS.with_label_values(&[method, status]).inc();
             }
             Err(_) => {
-                CF_API_REQUESTS
-                    .with_label_values(&[method, "error"])
-                    .inc();
+                CF_API_REQUESTS.with_label_values(&[method, "error"]).inc();
             }
         }
         result.map_err(|e| Error::Cloudflare(format!("HTTP error ({method}): {e}")))
@@ -163,7 +169,11 @@ impl CfClient {
             config_src: "local".to_string(),
         };
 
-        let req = self.http.post(&url).headers(self.auth_headers()).json(&body);
+        let req = self
+            .http
+            .post(&url)
+            .headers(self.auth_headers())
+            .json(&body);
         let resp = self.send_instrumented("create_tunnel", req).await?;
 
         let cf_resp: CfResponse<CfTunnel> = resp
@@ -196,18 +206,20 @@ impl CfClient {
             self.base_url, self.account_id, self.tunnel_id
         );
         let req = self.http.delete(&clean_url).headers(self.auth_headers());
-        let resp = self.send_instrumented("clean_tunnel_connections", req).await?;
+        let resp = self
+            .send_instrumented("clean_tunnel_connections", req)
+            .await?;
 
-        let cf_resp: CfResponse<serde_json::Value> = resp
-            .json()
-            .await
-            .map_err(|e| {
-                Error::Cloudflare(format!("error parsing clean connections response: {e}"))
-            })?;
+        let cf_resp: CfResponse<serde_json::Value> = resp.json().await.map_err(|e| {
+            Error::Cloudflare(format!("error parsing clean connections response: {e}"))
+        })?;
 
         if !cf_resp.success {
-            let msgs: Vec<String> =
-                cf_resp.errors.iter().map(|e| format!("[{}] {}", e.code, e.message)).collect();
+            let msgs: Vec<String> = cf_resp
+                .errors
+                .iter()
+                .map(|e| format!("[{}] {}", e.code, e.message))
+                .collect();
             error!(
                 tunnel_id = %self.tunnel_id,
                 errors = %msgs.join("; "),
@@ -227,13 +239,14 @@ impl CfClient {
         let cf_resp: CfResponse<serde_json::Value> = resp
             .json()
             .await
-            .map_err(|e| {
-                Error::Cloudflare(format!("error parsing delete tunnel response: {e}"))
-            })?;
+            .map_err(|e| Error::Cloudflare(format!("error parsing delete tunnel response: {e}")))?;
 
         if !cf_resp.success {
-            let msgs: Vec<String> =
-                cf_resp.errors.iter().map(|e| format!("[{}] {}", e.code, e.message)).collect();
+            let msgs: Vec<String> = cf_resp
+                .errors
+                .iter()
+                .map(|e| format!("[{}] {}", e.code, e.message))
+                .collect();
             error!(
                 tunnel_id = %self.tunnel_id,
                 errors = %msgs.join("; "),
@@ -258,9 +271,7 @@ impl CfClient {
         let cf_resp: CfResponse<CfTunnel> = resp
             .json()
             .await
-            .map_err(|e| {
-                Error::Cloudflare(format!("error parsing get tunnel response: {e}"))
-            })?;
+            .map_err(|e| Error::Cloudflare(format!("error parsing get tunnel response: {e}")))?;
 
         Self::parse_response(cf_resp)
     }
@@ -268,15 +279,17 @@ impl CfClient {
     /// List tunnels in an account, filtered by name.
     pub async fn list_tunnels(&self, account_id: &str, name: &str) -> Result<Vec<CfTunnel>> {
         let url = format!("{}/accounts/{}/cfd_tunnel", self.base_url, account_id);
-        let req = self.http.get(&url).headers(self.auth_headers()).query(&[("name", name)]);
+        let req = self
+            .http
+            .get(&url)
+            .headers(self.auth_headers())
+            .query(&[("name", name)]);
         let resp = self.send_instrumented("list_tunnels", req).await?;
 
         let cf_resp: CfListResponse<CfTunnel> = resp
             .json()
             .await
-            .map_err(|e| {
-                Error::Cloudflare(format!("error parsing list tunnels response: {e}"))
-            })?;
+            .map_err(|e| Error::Cloudflare(format!("error parsing list tunnels response: {e}")))?;
 
         Self::parse_list_response(cf_resp)
     }
@@ -309,17 +322,14 @@ impl CfClient {
             let cf_resp: CfResponse<Account> = resp
                 .json()
                 .await
-                .map_err(|e| {
-                    Error::Cloudflare(format!("error parsing account response: {e}"))
-                })?;
+                .map_err(|e| Error::Cloudflare(format!("error parsing account response: {e}")))?;
 
-            if cf_resp.success {
-                if let Some(acct) = cf_resp.result {
-                    if acct.id == account_id {
-                        self.account_id = acct.id.clone();
-                        return Ok(acct.id);
-                    }
-                }
+            if cf_resp.success
+                && let Some(acct) = cf_resp.result
+                && acct.id == account_id
+            {
+                self.account_id = acct.id.clone();
+                return Ok(acct.id);
             }
             info!("account ID validation failed, falling back to account name");
         }
@@ -332,15 +342,17 @@ impl CfClient {
         }
 
         let url = format!("{}/accounts", self.base_url);
-        let req = self.http.get(&url).headers(self.auth_headers()).query(&[("name", account_name)]);
+        let req = self
+            .http
+            .get(&url)
+            .headers(self.auth_headers())
+            .query(&[("name", account_name)]);
         let resp = self.send_instrumented("list_accounts", req).await?;
 
         let cf_resp: CfListResponse<Account> = resp
             .json()
             .await
-            .map_err(|e| {
-                Error::Cloudflare(format!("error parsing accounts list response: {e}"))
-            })?;
+            .map_err(|e| Error::Cloudflare(format!("error parsing accounts list response: {e}")))?;
 
         let accounts = Self::parse_list_response(cf_resp)?;
 
@@ -429,15 +441,17 @@ impl CfClient {
         }
 
         let url = format!("{}/zones", self.base_url);
-        let req = self.http.get(&url).headers(self.auth_headers()).query(&[("name", domain)]);
+        let req = self
+            .http
+            .get(&url)
+            .headers(self.auth_headers())
+            .query(&[("name", domain)]);
         let resp = self.send_instrumented("list_zones", req).await?;
 
         let cf_resp: CfListResponse<Zone> = resp
             .json()
             .await
-            .map_err(|e| {
-                Error::Cloudflare(format!("error parsing zones list response: {e}"))
-            })?;
+            .map_err(|e| Error::Cloudflare(format!("error parsing zones list response: {e}")))?;
 
         let zones = Self::parse_list_response(cf_resp)?;
 
@@ -589,12 +603,9 @@ impl CfClient {
             let req = self.http.put(&url).headers(self.auth_headers()).json(&body);
             let resp = self.send_instrumented("update_cname", req).await?;
 
-            let cf_resp: CfResponse<DnsRecord> = resp
-                .json()
-                .await
-                .map_err(|e| {
-                    Error::Cloudflare(format!("error parsing update CNAME response: {e}"))
-                })?;
+            let cf_resp: CfResponse<DnsRecord> = resp.json().await.map_err(|e| {
+                Error::Cloudflare(format!("error parsing update CNAME response: {e}"))
+            })?;
 
             Self::parse_response(cf_resp)?;
             info!(fqdn = %fqdn, "CNAME record updated");
@@ -611,15 +622,16 @@ impl CfClient {
                 comment: "Managed by cloudflare-operator".to_string(),
             };
 
-            let req = self.http.post(&url).headers(self.auth_headers()).json(&body);
+            let req = self
+                .http
+                .post(&url)
+                .headers(self.auth_headers())
+                .json(&body);
             let resp = self.send_instrumented("create_cname", req).await?;
 
-            let cf_resp: CfResponse<DnsRecord> = resp
-                .json()
-                .await
-                .map_err(|e| {
-                    Error::Cloudflare(format!("error parsing create CNAME response: {e}"))
-                })?;
+            let cf_resp: CfResponse<DnsRecord> = resp.json().await.map_err(|e| {
+                Error::Cloudflare(format!("error parsing create CNAME response: {e}"))
+            })?;
 
             let record = Self::parse_response(cf_resp)?;
             info!(fqdn = %fqdn, dns_id = %record.id, "CNAME record created");
@@ -628,12 +640,7 @@ impl CfClient {
     }
 
     /// Create or update a managed TXT record for the given FQDN.
-    pub async fn insert_or_update_txt(
-        &self,
-        fqdn: &str,
-        txt_id: &str,
-        dns_id: &str,
-    ) -> Result<()> {
+    pub async fn insert_or_update_txt(&self, fqdn: &str, txt_id: &str, dns_id: &str) -> Result<()> {
         let txt_name = format!("{TXT_PREFIX}{fqdn}");
         let txt_content = serde_json::to_string(&DnsManagedRecordTxt {
             dns_id: dns_id.to_string(),
@@ -659,12 +666,9 @@ impl CfClient {
             let req = self.http.put(&url).headers(self.auth_headers()).json(&body);
             let resp = self.send_instrumented("update_txt", req).await?;
 
-            let cf_resp: CfResponse<DnsRecord> = resp
-                .json()
-                .await
-                .map_err(|e| {
-                    Error::Cloudflare(format!("error parsing update TXT response: {e}"))
-                })?;
+            let cf_resp: CfResponse<DnsRecord> = resp.json().await.map_err(|e| {
+                Error::Cloudflare(format!("error parsing update TXT response: {e}"))
+            })?;
 
             Self::parse_response(cf_resp)?;
             info!(fqdn = %fqdn, "TXT record updated");
@@ -680,15 +684,16 @@ impl CfClient {
                 comment: "Managed by cloudflare-operator".to_string(),
             };
 
-            let req = self.http.post(&url).headers(self.auth_headers()).json(&body);
+            let req = self
+                .http
+                .post(&url)
+                .headers(self.auth_headers())
+                .json(&body);
             let resp = self.send_instrumented("create_txt", req).await?;
 
-            let cf_resp: CfResponse<DnsRecord> = resp
-                .json()
-                .await
-                .map_err(|e| {
-                    Error::Cloudflare(format!("error parsing create TXT response: {e}"))
-                })?;
+            let cf_resp: CfResponse<DnsRecord> = resp.json().await.map_err(|e| {
+                Error::Cloudflare(format!("error parsing create TXT response: {e}"))
+            })?;
 
             Self::parse_response(cf_resp)?;
             info!(fqdn = %fqdn, "TXT record created");
@@ -713,13 +718,14 @@ impl CfClient {
         let cf_resp: CfResponse<serde_json::Value> = resp
             .json()
             .await
-            .map_err(|e| {
-                Error::Cloudflare(format!("error parsing delete DNS response: {e}"))
-            })?;
+            .map_err(|e| Error::Cloudflare(format!("error parsing delete DNS response: {e}")))?;
 
         if !cf_resp.success {
-            let msgs: Vec<String> =
-                cf_resp.errors.iter().map(|e| format!("[{}] {}", e.code, e.message)).collect();
+            let msgs: Vec<String> = cf_resp
+                .errors
+                .iter()
+                .map(|e| format!("[{}] {}", e.code, e.message))
+                .collect();
             error!(
                 fqdn = %fqdn,
                 dns_id = %dns_id,
@@ -736,10 +742,7 @@ impl CfClient {
     // ── Edge configuration ──────────────────────────────────────────────
 
     /// Push tunnel ingress configuration to Cloudflare's edge.
-    pub async fn update_tunnel_configuration(
-        &self,
-        ingress: &[TunnelIngressRule],
-    ) -> Result<()> {
+    pub async fn update_tunnel_configuration(&self, ingress: &[TunnelIngressRule]) -> Result<()> {
         let url = format!(
             "{}/accounts/{}/cfd_tunnel/{}/configurations",
             self.base_url, self.account_id, self.tunnel_id
@@ -753,18 +756,16 @@ impl CfClient {
         let req = self.http.put(&url).headers(self.auth_headers()).json(&body);
         let resp = self.send_instrumented("update_tunnel_config", req).await?;
 
-        let cf_resp: CfResponse<serde_json::Value> = resp
-            .json()
-            .await
-            .map_err(|e| {
-                Error::Cloudflare(format!(
-                    "error parsing tunnel configuration response: {e}"
-                ))
-            })?;
+        let cf_resp: CfResponse<serde_json::Value> = resp.json().await.map_err(|e| {
+            Error::Cloudflare(format!("error parsing tunnel configuration response: {e}"))
+        })?;
 
         if !cf_resp.success {
-            let msgs: Vec<String> =
-                cf_resp.errors.iter().map(|e| format!("[{}] {}", e.code, e.message)).collect();
+            let msgs: Vec<String> = cf_resp
+                .errors
+                .iter()
+                .map(|e| format!("[{}] {}", e.code, e.message))
+                .collect();
             error!(
                 tunnel_id = %self.tunnel_id,
                 errors = %msgs.join("; "),
@@ -796,15 +797,16 @@ impl CfClient {
     /// List DNS records by type and name.
     async fn list_dns_records(&self, record_type: &str, name: &str) -> Result<Vec<DnsRecord>> {
         let url = format!("{}/zones/{}/dns_records", self.base_url, self.zone_id);
-        let req = self.http.get(&url).headers(self.auth_headers()).query(&[("type", record_type), ("name", name)]);
+        let req = self
+            .http
+            .get(&url)
+            .headers(self.auth_headers())
+            .query(&[("type", record_type), ("name", name)]);
         let resp = self.send_instrumented("list_dns_records", req).await?;
 
-        let cf_resp: CfListResponse<DnsRecord> = resp
-            .json()
-            .await
-            .map_err(|e| {
-                Error::Cloudflare(format!("error parsing DNS records list response: {e}"))
-            })?;
+        let cf_resp: CfListResponse<DnsRecord> = resp.json().await.map_err(|e| {
+            Error::Cloudflare(format!("error parsing DNS records list response: {e}"))
+        })?;
 
         Self::parse_list_response(cf_resp)
     }

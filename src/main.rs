@@ -3,14 +3,14 @@ use std::sync::Arc;
 use futures::StreamExt;
 use k8s_openapi::api::apps::v1::Deployment;
 use k8s_openapi::api::core::v1::{ConfigMap, Secret};
-use kube::api::Api;
-use kube::runtime::watcher::Config as WatcherConfig;
-use kube::runtime::Controller;
 use kube::Client;
+use kube::api::Api;
+use kube::runtime::Controller;
 use kube::runtime::events::Reporter;
+use kube::runtime::watcher::Config as WatcherConfig;
 use kube_lease_manager::LeaseManagerBuilder;
 use tracing::{error, info};
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt};
 
 use cloudflare_operator::controllers::access_tunnel::{
     access_tunnel_error_policy, reconcile_access_tunnel,
@@ -25,8 +25,8 @@ use cloudflare_operator::crds::tunnel_binding::TunnelBinding;
 
 #[cfg(feature = "gateway-api")]
 use cloudflare_operator::controllers::gateway::{
-    gateway_class_error_policy, gateway_error_policy, httproute_error_policy,
-    reconcile_gateway, reconcile_gateway_class, reconcile_httproute,
+    gateway_class_error_policy, gateway_error_policy, httproute_error_policy, reconcile_gateway,
+    reconcile_gateway_class, reconcile_httproute,
 };
 #[cfg(feature = "gateway-api")]
 use cloudflare_operator::crds::gateway::{Gateway, GatewayClass, HTTPRoute};
@@ -117,9 +117,15 @@ async fn main() -> anyhow::Result<()> {
     let tunnels: Api<Tunnel> = Api::all(client.clone());
     let tunnel_bindings_for_tunnel: Api<TunnelBinding> = Api::all(client.clone());
     let tunnel_ctrl = Controller::new(tunnels, WatcherConfig::default())
-        .owns(Api::<ConfigMap>::all(client.clone()), WatcherConfig::default())
+        .owns(
+            Api::<ConfigMap>::all(client.clone()),
+            WatcherConfig::default(),
+        )
         .owns(Api::<Secret>::all(client.clone()), WatcherConfig::default())
-        .owns(Api::<Deployment>::all(client.clone()), WatcherConfig::default())
+        .owns(
+            Api::<Deployment>::all(client.clone()),
+            WatcherConfig::default(),
+        )
         .watches(
             tunnel_bindings_for_tunnel,
             WatcherConfig::default(),
@@ -146,9 +152,15 @@ async fn main() -> anyhow::Result<()> {
     let cluster_tunnels: Api<ClusterTunnel> = Api::all(client.clone());
     let tunnel_bindings_for_ct: Api<TunnelBinding> = Api::all(client.clone());
     let ct_ctrl = Controller::new(cluster_tunnels, WatcherConfig::default())
-        .owns(Api::<ConfigMap>::all(client.clone()), WatcherConfig::default())
+        .owns(
+            Api::<ConfigMap>::all(client.clone()),
+            WatcherConfig::default(),
+        )
         .owns(Api::<Secret>::all(client.clone()), WatcherConfig::default())
-        .owns(Api::<Deployment>::all(client.clone()), WatcherConfig::default())
+        .owns(
+            Api::<Deployment>::all(client.clone()),
+            WatcherConfig::default(),
+        )
         .watches(
             tunnel_bindings_for_ct,
             WatcherConfig::default(),
@@ -175,17 +187,13 @@ async fn main() -> anyhow::Result<()> {
     let tunnels_for_binding: Api<Tunnel> = Api::all(client.clone());
     let cluster_tunnels_for_binding: Api<ClusterTunnel> = Api::all(client.clone());
     let binding_ctrl = Controller::new(bindings, WatcherConfig::default())
-        .watches(
-            tunnels_for_binding,
-            WatcherConfig::default(),
-            |tunnel| {
-                // When a Tunnel changes, re-reconcile all TunnelBindings that reference it
-                // This is a mapper that returns an empty list; the label-based watch handles it.
-                // We trigger reconcile via the controller's cache invalidation.
-                let _ = tunnel;
-                None::<kube::runtime::reflector::ObjectRef<TunnelBinding>>
-            },
-        )
+        .watches(tunnels_for_binding, WatcherConfig::default(), |tunnel| {
+            // When a Tunnel changes, re-reconcile all TunnelBindings that reference it
+            // This is a mapper that returns an empty list; the label-based watch handles it.
+            // We trigger reconcile via the controller's cache invalidation.
+            let _ = tunnel;
+            None::<kube::runtime::reflector::ObjectRef<TunnelBinding>>
+        })
         .watches(
             cluster_tunnels_for_binding,
             WatcherConfig::default(),
@@ -205,8 +213,15 @@ async fn main() -> anyhow::Result<()> {
     // AccessTunnel controller (namespaced)
     let access_tunnels: Api<AccessTunnel> = Api::all(client.clone());
     let at_ctrl = Controller::new(access_tunnels, WatcherConfig::default())
-        .owns(Api::<Deployment>::all(client.clone()), WatcherConfig::default())
-        .run(reconcile_access_tunnel, access_tunnel_error_policy, ctx.clone())
+        .owns(
+            Api::<Deployment>::all(client.clone()),
+            WatcherConfig::default(),
+        )
+        .run(
+            reconcile_access_tunnel,
+            access_tunnel_error_policy,
+            ctx.clone(),
+        )
         .for_each(|res| async move {
             match res {
                 Ok(o) => info!(access_tunnel = ?o, "access tunnel reconciled"),
@@ -220,10 +235,16 @@ async fn main() -> anyhow::Result<()> {
 
     #[cfg(feature = "gateway-api")]
     let gc_ctrl = async {
-        if !gateway_api_enabled { return; }
+        if !gateway_api_enabled {
+            return;
+        }
         let gcs: Api<GatewayClass> = Api::all(client.clone());
         Controller::new(gcs, WatcherConfig::default())
-            .run(reconcile_gateway_class, gateway_class_error_policy, ctx.clone())
+            .run(
+                reconcile_gateway_class,
+                gateway_class_error_policy,
+                ctx.clone(),
+            )
             .for_each(|res| async move {
                 match res {
                     Ok(o) => info!(gateway_class = ?o, "GatewayClass reconciled"),
@@ -235,7 +256,9 @@ async fn main() -> anyhow::Result<()> {
 
     #[cfg(feature = "gateway-api")]
     let gw_ctrl = async {
-        if !gateway_api_enabled { return; }
+        if !gateway_api_enabled {
+            return;
+        }
         let gws: Api<Gateway> = Api::all(client.clone());
         Controller::new(gws, WatcherConfig::default())
             .run(reconcile_gateway, gateway_error_policy, ctx.clone())
@@ -250,7 +273,9 @@ async fn main() -> anyhow::Result<()> {
 
     #[cfg(feature = "gateway-api")]
     let hr_ctrl = async {
-        if !gateway_api_enabled { return; }
+        if !gateway_api_enabled {
+            return;
+        }
         let routes: Api<HTTPRoute> = Api::all(client.clone());
         Controller::new(routes, WatcherConfig::default())
             .run(reconcile_httproute, httproute_error_policy, ctx.clone())
@@ -266,7 +291,8 @@ async fn main() -> anyhow::Result<()> {
     // Health/readiness probe + metrics server on :8081
     let health_server = async {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let addr = std::env::var("HEALTH_PROBE_BIND_ADDRESS").unwrap_or_else(|_| "0.0.0.0:8081".into());
+        let addr =
+            std::env::var("HEALTH_PROBE_BIND_ADDRESS").unwrap_or_else(|_| "0.0.0.0:8081".into());
         let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
         info!("health/metrics server listening on {}", addr);
         loop {

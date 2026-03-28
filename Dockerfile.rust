@@ -1,26 +1,48 @@
-# Build the Rust operator binary (musl for fully static binary)
-FROM rust:1.94-alpine AS builder
-RUN apk add --no-cache musl-dev
+# Build stage: runs natively on build host, cross-compiles via cargo-zigbuild
+FROM --platform=$BUILDPLATFORM rust:1-bookworm AS builder
+
+ARG TARGETARCH
+
+# Install zig + cargo-zigbuild for cross-compilation
+RUN curl -fsSL https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz | tar -xJ -C /opt \
+    && ln -s /opt/zig-x86_64-linux-0.15.2/zig /usr/local/bin/zig \
+    && cargo install cargo-zigbuild --locked \
+    && rustup target add aarch64-unknown-linux-gnu x86_64-unknown-linux-gnu
+
 WORKDIR /app
 
-# Cache dependencies by building a dummy project first
+# Cache dependencies
 COPY Cargo.toml Cargo.lock ./
 RUN mkdir -p src/bin \
     && echo "fn main() {}" > src/main.rs \
     && echo "fn main() {}" > src/bin/crdgen.rs \
     && echo "pub fn lib() {}" > src/lib.rs \
-    && cargo build --release \
+    && if [ "$TARGETARCH" = "arm64" ]; then \
+         cargo zigbuild --release --target aarch64-unknown-linux-gnu; \
+       else \
+         cargo zigbuild --release --target x86_64-unknown-linux-gnu; \
+       fi \
     && rm -rf src
 
-# Build the actual source
+# Build actual source
 COPY src/ src/
-RUN touch src/main.rs src/bin/crdgen.rs src/lib.rs && cargo build --release
+RUN touch src/main.rs src/bin/crdgen.rs src/lib.rs \
+    && if [ "$TARGETARCH" = "arm64" ]; then \
+         cargo zigbuild --release --target aarch64-unknown-linux-gnu \
+         && cp target/aarch64-unknown-linux-gnu/release/controller target/release-out-controller \
+         && cp target/aarch64-unknown-linux-gnu/release/crdgen target/release-out-crdgen; \
+       else \
+         cargo zigbuild --release --target x86_64-unknown-linux-gnu \
+         && cp target/x86_64-unknown-linux-gnu/release/controller target/release-out-controller \
+         && cp target/x86_64-unknown-linux-gnu/release/crdgen target/release-out-crdgen; \
+       fi
 
-# Alpine runtime — tiny, has shell for debugging if needed
-FROM alpine:3.21
-RUN apk add --no-cache ca-certificates && adduser -D -u 65532 nonroot
-COPY --from=builder /app/target/release/controller /manager
-COPY --from=builder /app/target/release/crdgen /crdgen
+# Runtime
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -u 65532 -s /bin/false nonroot
+COPY --from=builder /app/target/release-out-controller /manager
+COPY --from=builder /app/target/release-out-crdgen /crdgen
 USER 65532
-
 ENTRYPOINT ["/manager"]

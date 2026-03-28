@@ -5,10 +5,9 @@ use std::time::Duration;
 use k8s_openapi::api::apps::v1::{Deployment, DeploymentSpec};
 use k8s_openapi::api::core::v1::{
     Affinity, Capabilities, ConfigMap, ConfigMapVolumeSource, Container, ContainerPort,
-    HTTPGetAction, KeyToPath, NodeAffinity, NodeSelector,
-    NodeSelectorRequirement, NodeSelectorTerm, PodSecurityContext, PodSpec, PodTemplateSpec,
-    Probe, Secret, SeccompProfile, SecurityContext, SecretVolumeSource, Volume,
-    VolumeMount,
+    HTTPGetAction, KeyToPath, NodeAffinity, NodeSelector, NodeSelectorRequirement,
+    NodeSelectorTerm, PodSecurityContext, PodSpec, PodTemplateSpec, Probe, SeccompProfile, Secret,
+    SecretVolumeSource, SecurityContext, Volume, VolumeMount,
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{LabelSelector, ObjectMeta, OwnerReference};
 use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
@@ -17,8 +16,8 @@ use kube::runtime::controller::Action;
 use kube::runtime::events::{Event, EventType};
 use kube::{Resource, ResourceExt};
 use md5::{Digest, Md5};
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use tracing::{error, info, warn};
 
 use crate::metrics::{RECONCILE_DURATION, RECONCILE_TOTAL};
@@ -49,7 +48,14 @@ const IS_CLUSTER_TUNNEL_LABEL: &str = "cfargotunnel.com/is-cluster-tunnel";
 
 /// Trait abstracting Tunnel and ClusterTunnel so reconciliation logic is shared.
 pub trait TunnelLike:
-    Resource<DynamicType = ()> + Clone + std::fmt::Debug + Send + Sync + DeserializeOwned + Serialize + 'static
+    Resource<DynamicType = ()>
+    + Clone
+    + std::fmt::Debug
+    + Send
+    + Sync
+    + DeserializeOwned
+    + Serialize
+    + 'static
 {
     fn tunnel_spec(&self) -> TunnelSpec;
     fn tunnel_status(&self) -> Option<&TunnelStatus>;
@@ -176,7 +182,11 @@ async fn reconcile_tunnel_inner<T: TunnelLike>(
     })?;
 
     // 2. Build CfClient from the secret data
-    let mut cf_client = build_cf_client(&spec.cloudflare, &cf_secret, ctx.cloudflare_api_base_url.as_deref())?;
+    let mut cf_client = build_cf_client(
+        &spec.cloudflare,
+        &cf_secret,
+        ctx.cloudflare_api_base_url.as_deref(),
+    )?;
     cf_client.domain = spec.cloudflare.domain.clone();
 
     // Pre-populate validated IDs from existing status so validate_all can short-circuit
@@ -202,9 +212,10 @@ async fn reconcile_tunnel_inner<T: TunnelLike>(
         cf_client.tunnel_name = existing.name.clone();
         cf_client.tunnel_id = existing.id.clone();
 
-        let secret_data = cf_secret.data.as_ref().ok_or_else(|| {
-            Error::MissingField("secret has no data".into())
-        })?;
+        let secret_data = cf_secret
+            .data
+            .as_ref()
+            .ok_or_else(|| Error::MissingField("secret has no data".into()))?;
 
         let cred_file_key = &spec.cloudflare.cloudflare_tunnel_credential_file;
         let cred_secret_key = &spec.cloudflare.cloudflare_tunnel_credential_secret;
@@ -228,10 +239,7 @@ async fn reconcile_tunnel_inner<T: TunnelLike>(
         }
     } else {
         // ── New tunnel ──────────────────────────────────────────────────
-        let is_deleting = obj
-            .meta()
-            .deletion_timestamp
-            .is_some();
+        let is_deleting = obj.meta().deletion_timestamp.is_some();
 
         if is_deleting {
             // Cleanup path
@@ -239,7 +247,7 @@ async fn reconcile_tunnel_inner<T: TunnelLike>(
                 .meta()
                 .finalizers
                 .as_ref()
-                .map_or(false, |f| f.contains(&TUNNEL_FINALIZER.to_string()));
+                .is_some_and(|f| f.contains(&TUNNEL_FINALIZER.to_string()));
 
             if has_finalizer {
                 info!(name = %name, "starting tunnel deletion cycle");
@@ -260,12 +268,7 @@ async fn reconcile_tunnel_inner<T: TunnelLike>(
                 // Scale deployment to 0 before deleting tunnel
                 let deploy_api: Api<Deployment> = Api::namespaced(k8s.clone(), &ns);
                 let scale_needed = match deploy_api.get(&name).await {
-                    Ok(dep) => dep
-                        .spec
-                        .as_ref()
-                        .and_then(|s| s.replicas)
-                        .unwrap_or(1)
-                        != 0,
+                    Ok(dep) => dep.spec.as_ref().and_then(|s| s.replicas).unwrap_or(1) != 0,
                     Err(_) => false,
                 };
 
@@ -276,7 +279,9 @@ async fn reconcile_tunnel_inner<T: TunnelLike>(
                             &Event {
                                 type_: EventType::Normal,
                                 reason: "Scaling".into(),
-                                note: Some("Scaling cloudflared deployment to 0 for deletion".into()),
+                                note: Some(
+                                    "Scaling cloudflared deployment to 0 for deletion".into(),
+                                ),
                                 action: "Scaling".into(),
                                 secondary: None,
                             },
@@ -288,7 +293,11 @@ async fn reconcile_tunnel_inner<T: TunnelLike>(
                         "spec": { "replicas": 0 }
                     });
                     deploy_api
-                        .patch(&name, &PatchParams::apply("cloudflare-operator"), &Patch::Merge(&patch))
+                        .patch(
+                            &name,
+                            &PatchParams::apply("cloudflare-operator"),
+                            &Patch::Merge(&patch),
+                        )
                         .await?;
                     recorder
                         .publish(
@@ -307,7 +316,15 @@ async fn reconcile_tunnel_inner<T: TunnelLike>(
                 }
 
                 // Clean up DNS records for all bindings referencing this tunnel
-                cleanup_dns_records(k8s, &mut cf_client, &name, T::kind_str(), &ns, T::is_cluster_scoped()).await;
+                cleanup_dns_records(
+                    k8s,
+                    &mut cf_client,
+                    &name,
+                    T::kind_str(),
+                    &ns,
+                    T::is_cluster_scoped(),
+                )
+                .await;
                 recorder
                     .publish(
                         &Event {
@@ -354,7 +371,9 @@ async fn reconcile_tunnel_inner<T: TunnelLike>(
                                 &Event {
                                     type_: EventType::Warning,
                                     reason: "FailedDeleting".into(),
-                                    note: Some(format!("Failed to delete tunnel on Cloudflare: {e}")),
+                                    note: Some(format!(
+                                        "Failed to delete tunnel on Cloudflare: {e}"
+                                    )),
                                     action: "Deleting".into(),
                                     secondary: None,
                                 },
@@ -395,14 +414,21 @@ async fn reconcile_tunnel_inner<T: TunnelLike>(
         // Not deleting: create tunnel if needed
         if status.tunnel_id.is_empty() {
             let tunnel_name = spec.new_tunnel.as_ref().unwrap().name.clone();
-            let tn = if tunnel_name.is_empty() { name.clone() } else { tunnel_name };
+            let tn = if tunnel_name.is_empty() {
+                name.clone()
+            } else {
+                tunnel_name
+            };
 
             // Validate account first so we have account_id for create_tunnel
             cf_client
                 .validate_account(&spec.cloudflare.account_id, &spec.cloudflare.account_name)
                 .await?;
 
-            match cf_client.create_tunnel(&cf_client.account_id.clone(), &tn).await {
+            match cf_client
+                .create_tunnel(&cf_client.account_id.clone(), &tn)
+                .await
+            {
                 Ok((tunnel_id, creds_json)) => {
                     info!(name = %name, tunnel_id = %tunnel_id, "tunnel created on cloudflare");
                     recorder
@@ -441,10 +467,10 @@ async fn reconcile_tunnel_inner<T: TunnelLike>(
             // Tunnel already created, read creds from existing managed secret
             match secrets_api.get(&name).await {
                 Ok(sec) => {
-                    if let Some(data) = &sec.data {
-                        if let Some(creds) = data.get(CREDENTIALS_JSON_FILENAME) {
-                            tunnel_creds = String::from_utf8_lossy(&creds.0).to_string();
-                        }
+                    if let Some(data) = &sec.data
+                        && let Some(creds) = data.get(CREDENTIALS_JSON_FILENAME)
+                    {
+                        tunnel_creds = String::from_utf8_lossy(&creds.0).to_string();
                     }
                 }
                 Err(e) => {
@@ -458,7 +484,7 @@ async fn reconcile_tunnel_inner<T: TunnelLike>(
             .meta()
             .finalizers
             .as_ref()
-            .map_or(false, |f| f.contains(&TUNNEL_FINALIZER.to_string()));
+            .is_some_and(|f| f.contains(&TUNNEL_FINALIZER.to_string()));
 
         if !has_finalizer {
             let mut finalizers = obj.meta().finalizers.clone().unwrap_or_default();
@@ -498,7 +524,12 @@ async fn reconcile_tunnel_inner<T: TunnelLike>(
         .await?;
 
     // 4. Update labels on the tunnel resource
-    let labels = labels_for_tunnel(&name, &cf_client, &spec.cloudflare.domain, T::is_cluster_scoped());
+    let labels = labels_for_tunnel(
+        &name,
+        &cf_client,
+        &spec.cloudflare.domain,
+        T::is_cluster_scoped(),
+    );
     let label_patch = serde_json::json!({
         "metadata": { "labels": labels }
     });
@@ -689,7 +720,15 @@ async fn reconcile_tunnel_inner<T: TunnelLike>(
     }
 
     // 9. Rebuild ConfigMap ingress from current TunnelBindings
-    rebuild_tunnel_config(k8s, &name, T::kind_str(), &ns, &spec.fallback_target, &cf_client).await?;
+    rebuild_tunnel_config(
+        k8s,
+        &name,
+        T::kind_str(),
+        &ns,
+        &spec.fallback_target,
+        &cf_client,
+    )
+    .await?;
 
     Ok(Action::requeue(Duration::from_secs(300)))
 }
@@ -707,12 +746,17 @@ fn build_cf_client(
     secret: &Secret,
     base_url: Option<&str>,
 ) -> Result<CfClient, Error> {
-    let data = secret.data.as_ref().ok_or_else(|| {
-        Error::MissingField("cloudflare secret has no data".into())
-    })?;
+    let data = secret
+        .data
+        .as_ref()
+        .ok_or_else(|| Error::MissingField("cloudflare secret has no data".into()))?;
 
-    let api_token = data.get(&cf.cloudflare_api_token).map(|b| String::from_utf8_lossy(&b.0).to_string());
-    let api_key = data.get(&cf.cloudflare_api_key).map(|b| String::from_utf8_lossy(&b.0).to_string());
+    let api_token = data
+        .get(&cf.cloudflare_api_token)
+        .map(|b| String::from_utf8_lossy(&b.0).to_string());
+    let api_key = data
+        .get(&cf.cloudflare_api_key)
+        .map(|b| String::from_utf8_lossy(&b.0).to_string());
 
     if api_token.is_none() && api_key.is_none() {
         return Err(Error::MissingField(format!(
@@ -885,6 +929,7 @@ fn build_config_map(
 
 // ── Helper: build Deployment ────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 fn build_deployment(
     name: &str,
     ns: &str,
@@ -968,7 +1013,10 @@ fn build_deployment(
     }
 
     let mut annotations = BTreeMap::new();
-    annotations.insert(TUNNEL_CONFIG_CHECKSUM.to_string(), config_checksum.to_string());
+    annotations.insert(
+        TUNNEL_CONFIG_CHECKSUM.to_string(),
+        config_checksum.to_string(),
+    );
 
     Deployment {
         metadata: ObjectMeta {
@@ -1035,26 +1083,28 @@ fn build_deployment(
                     volumes: Some(volumes),
                     affinity: Some(Affinity {
                         node_affinity: Some(NodeAffinity {
-                            required_during_scheduling_ignored_during_execution: Some(NodeSelector {
-                                node_selector_terms: vec![NodeSelectorTerm {
-                                    match_expressions: Some(vec![
-                                        NodeSelectorRequirement {
-                                            key: "kubernetes.io/arch".to_string(),
-                                            operator: "In".to_string(),
-                                            values: Some(vec![
-                                                "amd64".to_string(),
-                                                "arm64".to_string(),
-                                            ]),
-                                        },
-                                        NodeSelectorRequirement {
-                                            key: "kubernetes.io/os".to_string(),
-                                            operator: "In".to_string(),
-                                            values: Some(vec!["linux".to_string()]),
-                                        },
-                                    ]),
-                                    ..Default::default()
-                                }],
-                            }),
+                            required_during_scheduling_ignored_during_execution: Some(
+                                NodeSelector {
+                                    node_selector_terms: vec![NodeSelectorTerm {
+                                        match_expressions: Some(vec![
+                                            NodeSelectorRequirement {
+                                                key: "kubernetes.io/arch".to_string(),
+                                                operator: "In".to_string(),
+                                                values: Some(vec![
+                                                    "amd64".to_string(),
+                                                    "arm64".to_string(),
+                                                ]),
+                                            },
+                                            NodeSelectorRequirement {
+                                                key: "kubernetes.io/os".to_string(),
+                                                operator: "In".to_string(),
+                                                values: Some(vec!["linux".to_string()]),
+                                            },
+                                        ]),
+                                        ..Default::default()
+                                    }],
+                                },
+                            ),
                             ..Default::default()
                         }),
                         ..Default::default()
@@ -1079,16 +1129,15 @@ async fn cleanup_dns_records(
     is_cluster: bool,
 ) {
     // Validate zone before trying DNS operations
-    if cf_client.zone_id.is_empty() {
-        if let Err(e) = cf_client.validate_zone(&cf_client.domain.clone()).await {
-            warn!(error = %e, "cannot validate zone for DNS cleanup, skipping");
-            return;
-        }
+    if cf_client.zone_id.is_empty()
+        && let Err(e) = cf_client.validate_zone(&cf_client.domain.clone()).await
+    {
+        warn!(error = %e, "cannot validate zone for DNS cleanup, skipping");
+        return;
     }
 
-    let label_selector = format!(
-        "{TUNNEL_NAME_LABEL}={tunnel_name},{TUNNEL_KIND_LABEL}={tunnel_kind}"
-    );
+    let label_selector =
+        format!("{TUNNEL_NAME_LABEL}={tunnel_name},{TUNNEL_KIND_LABEL}={tunnel_kind}");
     let lp = ListParams::default().labels(&label_selector);
 
     let bindings: Vec<TunnelBinding> = if is_cluster {
@@ -1138,7 +1187,10 @@ async fn delete_dns_for_hostname(cf_client: &CfClient, hostname: &str) -> Result
     }
 
     if !txt_data.dns_id.is_empty() {
-        if let Err(e) = cf_client.delete_dns_id(hostname, &txt_data.dns_id, true).await {
+        if let Err(e) = cf_client
+            .delete_dns_id(hostname, &txt_data.dns_id, true)
+            .await
+        {
             warn!(hostname = %hostname, error = %e, "failed to delete CNAME record");
         } else {
             info!(hostname = %hostname, "deleted DNS CNAME record");
@@ -1182,15 +1234,14 @@ async fn rebuild_tunnel_config(
         .map_err(|e| Error::Config(format!("failed to parse cloudflared config: {e}")))?;
 
     // List TunnelBindings for this tunnel
-    let label_selector = format!(
-        "{TUNNEL_NAME_LABEL}={tunnel_name},{TUNNEL_KIND_LABEL}={tunnel_kind}"
-    );
+    let label_selector =
+        format!("{TUNNEL_NAME_LABEL}={tunnel_name},{TUNNEL_KIND_LABEL}={tunnel_kind}");
     let lp = ListParams::default().labels(&label_selector);
     let binding_api: Api<TunnelBinding> = Api::all(k8s.clone());
     let binding_list = binding_api.list(&lp).await?;
 
     let mut bindings = binding_list.items;
-    bindings.sort_by(|a, b| a.name_any().cmp(&b.name_any()));
+    bindings.sort_by_key(|a| a.name_any());
 
     // Build ingress rules from all current bindings
     let mut final_ingresses: Vec<UnvalidatedIngressRule> = Vec::new();
@@ -1206,9 +1257,11 @@ async fn rebuild_tunnel_config(
                     subject.spec.target.clone()
                 };
 
-                let mut origin_req = OriginRequestConfig::default();
-                origin_req.no_tls_verify = Some(subject.spec.no_tls_verify);
-                origin_req.http2_origin = Some(subject.spec.http2_origin);
+                let mut origin_req = OriginRequestConfig {
+                    no_tls_verify: Some(subject.spec.no_tls_verify),
+                    http2_origin: Some(subject.spec.http2_origin),
+                    ..Default::default()
+                };
                 if !subject.spec.proxy_address.is_empty() {
                     origin_req.proxy_address = Some(subject.spec.proxy_address.clone());
                 }
@@ -1219,7 +1272,8 @@ async fn rebuild_tunnel_config(
                     origin_req.proxy_type = Some(subject.spec.proxy_type.clone());
                 }
                 if !subject.spec.ca_pool.is_empty() {
-                    origin_req.ca_pool = Some(format!("/etc/cloudflared/certs/{}", subject.spec.ca_pool));
+                    origin_req.ca_pool =
+                        Some(format!("/etc/cloudflared/certs/{}", subject.spec.ca_pool));
                 }
 
                 final_ingresses.push(UnvalidatedIngressRule {
@@ -1275,41 +1329,46 @@ async fn rebuild_tunnel_config(
         }
     });
     cm_api
-        .patch(tunnel_name, &PatchParams::apply("cloudflare-operator"), &Patch::Merge(&cm_patch))
+        .patch(
+            tunnel_name,
+            &PatchParams::apply("cloudflare-operator"),
+            &Patch::Merge(&cm_patch),
+        )
         .await?;
 
     // Update deployment checksum to trigger pod restart
     let new_checksum = compute_md5(&new_config_str);
     let deploy_api: Api<Deployment> = Api::namespaced(k8s.clone(), ns);
-    match deploy_api.get_opt(tunnel_name).await? {
-        Some(dep) => {
-            let current_checksum = dep
-                .spec
-                .as_ref()
-                .and_then(|s| s.template.metadata.as_ref())
-                .and_then(|m| m.annotations.as_ref())
-                .and_then(|a| a.get(TUNNEL_CONFIG_CHECKSUM))
-                .cloned()
-                .unwrap_or_default();
+    if let Some(dep) = deploy_api.get_opt(tunnel_name).await? {
+        let current_checksum = dep
+            .spec
+            .as_ref()
+            .and_then(|s| s.template.metadata.as_ref())
+            .and_then(|m| m.annotations.as_ref())
+            .and_then(|a| a.get(TUNNEL_CONFIG_CHECKSUM))
+            .cloned()
+            .unwrap_or_default();
 
-            if current_checksum != new_checksum {
-                let dep_patch = serde_json::json!({
-                    "spec": {
-                        "template": {
-                            "metadata": {
-                                "annotations": {
-                                    TUNNEL_CONFIG_CHECKSUM: new_checksum
-                                }
+        if current_checksum != new_checksum {
+            let dep_patch = serde_json::json!({
+                "spec": {
+                    "template": {
+                        "metadata": {
+                            "annotations": {
+                                TUNNEL_CONFIG_CHECKSUM: new_checksum
                             }
                         }
                     }
-                });
-                deploy_api
-                    .patch(tunnel_name, &PatchParams::apply("cloudflare-operator"), &Patch::Merge(&dep_patch))
-                    .await?;
-            }
+                }
+            });
+            deploy_api
+                .patch(
+                    tunnel_name,
+                    &PatchParams::apply("cloudflare-operator"),
+                    &Patch::Merge(&dep_patch),
+                )
+                .await?;
         }
-        None => {}
     }
 
     info!(tunnel = %tunnel_name, binding_count = bindings.len(), "rebuilt tunnel config from current bindings");
@@ -1329,10 +1388,6 @@ fn compute_md5(input: &str) -> String {
 
 mod hex {
     pub fn encode(bytes: impl AsRef<[u8]>) -> String {
-        bytes
-            .as_ref()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect()
+        bytes.as_ref().iter().map(|b| format!("{b:02x}")).collect()
     }
 }

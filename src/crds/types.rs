@@ -242,7 +242,10 @@ pub struct TunnelBindingSubjectSpec {
     pub http2_origin: bool,
 
     /// ProxyAddress configures the listen address for the proxy
-    #[serde(default = "default_proxy_address", skip_serializing_if = "String::is_empty")]
+    #[serde(
+        default = "default_proxy_address",
+        skip_serializing_if = "String::is_empty"
+    )]
     pub proxy_address: String,
 
     /// ProxyPort configures the listen port for the proxy

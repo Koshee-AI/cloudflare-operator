@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
-use k8s_openapi::api::core::v1::ObjectReference;
 use k8s_openapi::api::apps::v1::Deployment;
+use k8s_openapi::api::core::v1::ObjectReference;
 use k8s_openapi::api::core::v1::{ConfigMap, Secret, Service};
 use kube::api::{Api, ListParams, Patch, PatchParams};
 use kube::runtime::controller::Action;
@@ -74,30 +74,34 @@ async fn reconcile_binding_inner(
     info!(name = %binding_name, ns = %binding_ns, "reconciling tunnel binding");
 
     // 1. Look up the referenced Tunnel or ClusterTunnel
-    let tunnel_info = match get_tunnel_info(k8s, &obj, &binding_ns, &ctx.cluster_resource_namespace).await {
-        Ok(info) => info,
-        Err(e) => {
-            recorder
-                .publish(
-                    &Event {
-                        type_: EventType::Warning,
-                        reason: "ErrTunnel".into(),
-                        note: Some(format!("Failed to look up referenced tunnel: {e}")),
-                        action: "Reconciling".into(),
-                        secondary: None,
-                    },
-                    &obj_ref,
-                )
-                .await
-                .ok();
-            return Err(e);
-        }
-    };
+    let tunnel_info =
+        match get_tunnel_info(k8s, &obj, &binding_ns, &ctx.cluster_resource_namespace).await {
+            Ok(info) => info,
+            Err(e) => {
+                recorder
+                    .publish(
+                        &Event {
+                            type_: EventType::Warning,
+                            reason: "ErrTunnel".into(),
+                            note: Some(format!("Failed to look up referenced tunnel: {e}")),
+                            action: "Reconciling".into(),
+                            secondary: None,
+                        },
+                        &obj_ref,
+                    )
+                    .await
+                    .ok();
+                return Err(e);
+            }
+        };
 
     // 2. Read CF credentials from the tunnel's Secret (or credential_secret_ref override)
     let (secret_name, secret_ns) = match &obj.tunnel_ref.credential_secret_ref {
         Some(secret_ref) => (secret_ref.name.clone(), secret_ref.namespace.clone()),
-        None => (tunnel_info.cloudflare.secret.clone(), tunnel_info.tunnel_ns.clone()),
+        None => (
+            tunnel_info.cloudflare.secret.clone(),
+            tunnel_info.tunnel_ns.clone(),
+        ),
     };
 
     let secrets_api: Api<Secret> = Api::namespaced(k8s.clone(), &secret_ns);
@@ -229,11 +233,7 @@ async fn reconcile_binding_inner(
     Ok(Action::requeue(Duration::from_secs(300)))
 }
 
-pub fn binding_error_policy(
-    _obj: Arc<TunnelBinding>,
-    error: &Error,
-    _ctx: Arc<Context>,
-) -> Action {
+pub fn binding_error_policy(_obj: Arc<TunnelBinding>, error: &Error, _ctx: Arc<Context>) -> Action {
     error!(error = %error, "tunnel binding reconciliation error, will retry");
     Action::requeue(Duration::from_secs(15))
 }
@@ -454,7 +454,7 @@ async fn handle_deletion(
         .metadata
         .finalizers
         .as_ref()
-        .map_or(false, |f| f.contains(&TUNNEL_FINALIZER.to_string()));
+        .is_some_and(|f| f.contains(&TUNNEL_FINALIZER.to_string()));
 
     if !has_finalizer {
         return Ok(Action::requeue(Duration::from_secs(1)));
@@ -608,6 +608,7 @@ async fn delete_dns_for_hostname(cf_client: &CfClient, hostname: &str) -> Result
 
 // ── Creation logic ──────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_creation(
     k8s: &kube::Client,
     binding: &TunnelBinding,
@@ -623,11 +624,7 @@ async fn handle_creation(
     let api: Api<TunnelBinding> = Api::namespaced(k8s.clone(), ns);
 
     // Set labels
-    let mut labels: BTreeMap<String, String> = binding
-        .metadata
-        .labels
-        .clone()
-        .unwrap_or_default();
+    let mut labels: BTreeMap<String, String> = binding.metadata.labels.clone().unwrap_or_default();
     labels.insert(
         TUNNEL_NAME_LABEL.to_string(),
         binding.tunnel_ref.name.clone(),
@@ -670,7 +667,7 @@ async fn handle_creation(
         .metadata
         .finalizers
         .as_ref()
-        .map_or(false, |f| f.contains(&TUNNEL_FINALIZER.to_string()));
+        .is_some_and(|f| f.contains(&TUNNEL_FINALIZER.to_string()));
 
     if !has_finalizer {
         let mut finalizers = binding.metadata.finalizers.clone().unwrap_or_default();
@@ -713,7 +710,10 @@ async fn handle_creation(
                         &Event {
                             type_: EventType::Normal,
                             reason: "CreatedDns".into(),
-                            note: Some(format!("DNS CNAME+TXT created/updated for {}", svc.hostname)),
+                            note: Some(format!(
+                                "DNS CNAME+TXT created/updated for {}",
+                                svc.hostname
+                            )),
                             action: "Reconciling".into(),
                             secondary: None,
                         },
@@ -871,7 +871,7 @@ async fn configure_cloudflare_daemon(
     let binding_list = binding_api.list(&lp).await?;
 
     let mut bindings = binding_list.items;
-    bindings.sort_by(|a, b| a.name_any().cmp(&b.name_any()));
+    bindings.sort_by_key(|a| a.name_any());
 
     // Build ingress rules from all bindings
     let mut final_ingresses: Vec<UnvalidatedIngressRule> = Vec::new();

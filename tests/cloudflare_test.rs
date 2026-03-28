@@ -163,16 +163,21 @@ async fn test_validate_account_by_name() {
     Mock::given(method("GET"))
         .and(path("/accounts"))
         .and(query_param("name", "My Account"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(cf_list_ok(&[json!({
-            "id": "acct-333",
-            "name": "My Account"
-        })])))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(cf_list_ok(&[json!({
+                "id": "acct-333",
+                "name": "My Account"
+            })])),
+        )
         .expect(1)
         .mount(&server)
         .await;
 
     let mut client = new_client(&server.uri());
-    let result = client.validate_account("bad-id", "My Account").await.unwrap();
+    let result = client
+        .validate_account("bad-id", "My Account")
+        .await
+        .unwrap();
     assert_eq!(result, "acct-333");
     assert_eq!(client.account_id, "acct-333");
 }
@@ -186,10 +191,12 @@ async fn test_validate_zone() {
     Mock::given(method("GET"))
         .and(path("/zones"))
         .and(query_param("name", "example.com"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(cf_list_ok(&[json!({
-            "id": "zone-444",
-            "name": "example.com"
-        })])))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(cf_list_ok(&[json!({
+                "id": "zone-444",
+                "name": "example.com"
+            })])),
+        )
         .expect(1)
         .mount(&server)
         .await;
@@ -214,12 +221,14 @@ async fn test_get_dns_cname_id() {
         .and(path("/zones/zone-555/dns_records"))
         .and(query_param("type", "CNAME"))
         .and(query_param("name", "app.example.com"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(cf_list_ok(&[json!({
-            "id": "dns-cname-1",
-            "name": "app.example.com",
-            "type": "CNAME",
-            "content": "tun-aaa.cfargotunnel.com"
-        })])))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(cf_list_ok(&[json!({
+                "id": "dns-cname-1",
+                "name": "app.example.com",
+                "type": "CNAME",
+                "content": "tun-aaa.cfargotunnel.com"
+            })])),
+        )
         .expect(1)
         .mount(&server)
         .await;
@@ -249,18 +258,19 @@ async fn test_get_managed_dns_txt_owned_by_this_tunnel() {
         .and(path("/zones/zone-555/dns_records"))
         .and(query_param("type", "TXT"))
         .and(query_param("name", "_managed.app.example.com"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(cf_list_ok(&[json!({
-            "id": "dns-txt-1",
-            "name": "_managed.app.example.com",
-            "type": "TXT",
-            "content": txt_content.to_string()
-        })])))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(cf_list_ok(&[json!({
+                "id": "dns-txt-1",
+                "name": "_managed.app.example.com",
+                "type": "TXT",
+                "content": txt_content.to_string()
+            })])),
+        )
         .expect(1)
         .mount(&server)
         .await;
 
-    let (txt_id, txt_data, can_use) =
-        client.get_managed_dns_txt("app.example.com").await.unwrap();
+    let (txt_id, txt_data, can_use) = client.get_managed_dns_txt("app.example.com").await.unwrap();
 
     assert_eq!(txt_id, "dns-txt-1");
     assert_eq!(txt_data.dns_id, "dns-cname-1");
@@ -287,22 +297,26 @@ async fn test_get_managed_dns_txt_owned_by_other_tunnel() {
         .and(path("/zones/zone-555/dns_records"))
         .and(query_param("type", "TXT"))
         .and(query_param("name", "_managed.app.example.com"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(cf_list_ok(&[json!({
-            "id": "dns-txt-2",
-            "name": "_managed.app.example.com",
-            "type": "TXT",
-            "content": txt_content.to_string()
-        })])))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(cf_list_ok(&[json!({
+                "id": "dns-txt-2",
+                "name": "_managed.app.example.com",
+                "type": "TXT",
+                "content": txt_content.to_string()
+            })])),
+        )
         .expect(1)
         .mount(&server)
         .await;
 
-    let (txt_id, txt_data, can_use) =
-        client.get_managed_dns_txt("app.example.com").await.unwrap();
+    let (txt_id, txt_data, can_use) = client.get_managed_dns_txt("app.example.com").await.unwrap();
 
     assert_eq!(txt_id, "dns-txt-2");
     assert_eq!(txt_data.tunnel_id, "tun-other");
-    assert!(!can_use, "should NOT be usable when owned by another tunnel");
+    assert!(
+        !can_use,
+        "should NOT be usable when owned by another tunnel"
+    );
 }
 
 #[tokio::test]
@@ -317,15 +331,19 @@ async fn test_get_managed_dns_txt_no_records() {
         .and(path("/zones/zone-555/dns_records"))
         .and(query_param("type", "TXT"))
         .and(query_param("name", "_managed.new.example.com"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(cf_list_ok::<serde_json::Value>(&[])))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(cf_list_ok::<serde_json::Value>(&[])),
+        )
         .expect(1)
         .mount(&server)
         .await;
 
-    let (txt_id, _txt_data, can_use) =
-        client.get_managed_dns_txt("new.example.com").await.unwrap();
+    let (txt_id, _txt_data, can_use) = client.get_managed_dns_txt("new.example.com").await.unwrap();
 
-    assert!(txt_id.is_empty(), "txt_id should be empty when no records exist");
+    assert!(
+        txt_id.is_empty(),
+        "txt_id should be empty when no records exist"
+    );
     assert!(can_use, "should be usable when no TXT records exist");
 }
 
@@ -547,16 +565,17 @@ async fn test_api_key_auth_headers() {
         .and(path("/zones"))
         .and(header("X-Auth-Key", "my-api-key"))
         .and(header("X-Auth-Email", "user@example.com"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(cf_list_ok(&[json!({
-            "id": "zone-key-1",
-            "name": "example.com"
-        })])))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(cf_list_ok(&[json!({
+                "id": "zone-key-1",
+                "name": "example.com"
+            })])),
+        )
         .expect(1)
         .mount(&server)
         .await;
 
-    let mut client =
-        CfClient::new_with_key("my-api-key", "user@example.com", Some(&server.uri()));
+    let mut client = CfClient::new_with_key("my-api-key", "user@example.com", Some(&server.uri()));
     let zone_id = client.validate_zone("example.com").await.unwrap();
     assert_eq!(zone_id, "zone-key-1");
 }

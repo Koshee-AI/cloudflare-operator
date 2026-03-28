@@ -4,9 +4,9 @@ use std::time::Duration;
 
 use k8s_openapi::api::apps::v1::Deployment;
 use k8s_openapi::api::core::v1::{ConfigMap, Secret, Service};
+use kube::ResourceExt;
 use kube::api::{Api, ListParams, Patch, PatchParams};
 use kube::runtime::controller::Action;
-use kube::ResourceExt;
 use md5::{Digest, Md5};
 use tracing::{error, info, warn};
 
@@ -91,10 +91,7 @@ pub fn gateway_class_error_policy(
 
 // ── Gateway controller ──────────────────────────────────────────────────
 
-pub async fn reconcile_gateway(
-    obj: Arc<Gateway>,
-    ctx: Arc<Context>,
-) -> Result<Action, Error> {
+pub async fn reconcile_gateway(obj: Arc<Gateway>, ctx: Arc<Context>) -> Result<Action, Error> {
     let k8s = &ctx.client;
     let name = obj.name_any();
     let ns = obj.metadata.namespace.clone().unwrap_or_default();
@@ -177,7 +174,11 @@ pub async fn reconcile_gateway(
     };
 
     let (accepted_status, accepted_reason, accepted_msg) = if tunnel_exists {
-        ("True", "Accepted", "Gateway accepted and linked to tunnel".to_string())
+        (
+            "True",
+            "Accepted",
+            "Gateway accepted and linked to tunnel".to_string(),
+        )
     } else {
         (
             "False",
@@ -232,11 +233,7 @@ pub async fn reconcile_gateway(
     Ok(Action::requeue(Duration::from_secs(300)))
 }
 
-pub fn gateway_error_policy(
-    _obj: Arc<Gateway>,
-    error: &Error,
-    _ctx: Arc<Context>,
-) -> Action {
+pub fn gateway_error_policy(_obj: Arc<Gateway>, error: &Error, _ctx: Arc<Context>) -> Action {
     error!(error = %error, "Gateway reconciliation error, will retry");
     Action::requeue(Duration::from_secs(15))
 }
@@ -254,10 +251,7 @@ struct RouteTunnelInfo {
     tunnel_ns: String,
 }
 
-pub async fn reconcile_httproute(
-    obj: Arc<HTTPRoute>,
-    ctx: Arc<Context>,
-) -> Result<Action, Error> {
+pub async fn reconcile_httproute(obj: Arc<HTTPRoute>, ctx: Arc<Context>) -> Result<Action, Error> {
     let k8s = &ctx.client;
     let route_ns = obj.metadata.namespace.clone().unwrap_or_default();
     let route_name = obj.name_any();
@@ -265,8 +259,7 @@ pub async fn reconcile_httproute(
     info!(name = %route_name, ns = %route_ns, "reconciling HTTPRoute");
 
     // Find a parent Gateway that we manage
-    let (gateway, gateway_name, gateway_ns) =
-        find_managed_gateway(k8s, &obj, &route_ns).await?;
+    let (gateway, gateway_name, gateway_ns) = find_managed_gateway(k8s, &obj, &route_ns).await?;
 
     let annotations = gateway.metadata.annotations.as_ref();
     let tunnel_name = annotations
@@ -283,12 +276,20 @@ pub async fn reconcile_httproute(
         .unwrap_or_else(|| "Tunnel".to_string());
 
     // Resolve tunnel info
-    let tunnel_info =
-        get_tunnel_info(k8s, &tunnel_name, &tunnel_kind, &gateway_ns, &ctx.cluster_resource_namespace)
-            .await?;
+    let tunnel_info = get_tunnel_info(
+        k8s,
+        &tunnel_name,
+        &tunnel_kind,
+        &gateway_ns,
+        &ctx.cluster_resource_namespace,
+    )
+    .await?;
 
     // Build CfClient
-    let (secret_name, secret_ns) = (tunnel_info.cloudflare.secret.clone(), tunnel_info.tunnel_ns.clone());
+    let (secret_name, secret_ns) = (
+        tunnel_info.cloudflare.secret.clone(),
+        tunnel_info.tunnel_ns.clone(),
+    );
     let secrets_api: Api<Secret> = Api::namespaced(k8s.clone(), &secret_ns);
     let cf_secret = secrets_api.get(&secret_name).await.map_err(|e| {
         error!(secret = %secret_name, ns = %secret_ns, error = %e, "failed to read cloudflare secret");
@@ -364,7 +365,9 @@ pub async fn reconcile_httproute(
         if svc.hostname.is_empty() {
             continue;
         }
-        if let Err(e) = create_dns_for_hostname(&cf_client, &svc.hostname, ctx.overwrite_unmanaged).await {
+        if let Err(e) =
+            create_dns_for_hostname(&cf_client, &svc.hostname, ctx.overwrite_unmanaged).await
+        {
             error!(hostname = %svc.hostname, error = %e, "failed to create/update DNS for HTTPRoute");
             had_errors = true;
         }
@@ -400,17 +403,21 @@ pub async fn reconcile_httproute(
     .await?;
 
     // Update HTTPRoute status
-    update_httproute_status(k8s, &obj, &route_name, &route_ns, &gateway_name, &gateway_ns).await?;
+    update_httproute_status(
+        k8s,
+        &obj,
+        &route_name,
+        &route_ns,
+        &gateway_name,
+        &gateway_ns,
+    )
+    .await?;
 
     info!(name = %route_name, service_count = services.len(), "HTTPRoute reconciled");
     Ok(Action::requeue(Duration::from_secs(300)))
 }
 
-pub fn httproute_error_policy(
-    _obj: Arc<HTTPRoute>,
-    error: &Error,
-    _ctx: Arc<Context>,
-) -> Action {
+pub fn httproute_error_policy(_obj: Arc<HTTPRoute>, error: &Error, _ctx: Arc<Context>) -> Action {
     error!(error = %error, "HTTPRoute reconciliation error, will retry");
     Action::requeue(Duration::from_secs(15))
 }
@@ -614,7 +621,10 @@ async fn resolve_backend_target(
             };
 
             let protocol = select_protocol_for_port(port);
-            format!("{protocol}://{}:{port}", format!("{}.{svc_ns}.svc", backend.name))
+            format!(
+                "{protocol}://{}:{port}",
+                format!("{}.{svc_ns}.svc", backend.name)
+            )
         }
         Err(e) => {
             warn!(
@@ -663,8 +673,7 @@ fn regex_escape(s: &str) -> String {
     let mut result = String::with_capacity(s.len() + 8);
     for c in s.chars() {
         match c {
-            '.' | '+' | '*' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '\\' | '|' | '^'
-            | '$' => {
+            '.' | '+' | '*' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '\\' | '|' | '^' | '$' => {
                 result.push('\\');
                 result.push(c);
             }
@@ -975,7 +984,8 @@ pub async fn rebuild_combined_tunnel_config(
     }
 
     // 2. Collect ingress rules from HTTPRoutes referencing Gateways that link to this tunnel
-    let httproute_rules = collect_httproute_ingress_rules(k8s, tunnel_name, tunnel_kind, cf_client).await?;
+    let httproute_rules =
+        collect_httproute_ingress_rules(k8s, tunnel_name, tunnel_kind, cf_client).await?;
     final_ingresses.extend(httproute_rules);
 
     // Sort deterministically: by hostname, then path

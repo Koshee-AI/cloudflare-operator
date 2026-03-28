@@ -20,7 +20,11 @@ pub struct Configuration {
     pub warp_routing: Option<WarpRoutingConfig>,
 
     /// Global origin request configuration
-    #[serde(rename = "originRequest", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "originRequest",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub origin_request: Option<OriginRequestConfig>,
 
     /// Path to the credentials file
@@ -32,7 +36,11 @@ pub struct Configuration {
     pub metrics: Option<String>,
 
     /// Disable auto-update
-    #[serde(rename = "no-autoupdate", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "no-autoupdate",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub no_auto_update: Option<bool>,
 }
 
@@ -105,7 +113,11 @@ pub struct OriginRequestConfig {
     pub ca_pool: Option<String>,
 
     /// Disables TLS verification of the certificate presented by your origin
-    #[serde(rename = "noTLSVerify", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "noTLSVerify",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub no_tls_verify: Option<bool>,
 
     /// Attempt to connect to origin using HTTP2

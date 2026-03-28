@@ -128,9 +128,18 @@ fn test_tunnel_binding_serialization() {
     let val = serde_json::to_value(&binding).unwrap();
 
     // TunnelBinding has subjects and tunnelRef at top level, NOT under spec
-    assert!(val.get("spec").is_none(), "TunnelBinding should NOT have a 'spec' wrapper");
-    assert!(val.get("subjects").is_some(), "subjects should be at top level");
-    assert!(val.get("tunnelRef").is_some(), "tunnelRef should be at top level");
+    assert!(
+        val.get("spec").is_none(),
+        "TunnelBinding should NOT have a 'spec' wrapper"
+    );
+    assert!(
+        val.get("subjects").is_some(),
+        "subjects should be at top level"
+    );
+    assert!(
+        val.get("tunnelRef").is_some(),
+        "tunnelRef should be at top level"
+    );
 
     // Verify subjects array
     let subjects = val["subjects"].as_array().unwrap();
@@ -347,6 +356,12 @@ fn test_cloudflare_details_defaults() {
     assert!(details.email.is_empty());
     assert_eq!(details.cloudflare_api_key, "CLOUDFLARE_API_KEY");
     assert_eq!(details.cloudflare_api_token, "CLOUDFLARE_API_TOKEN");
-    assert_eq!(details.cloudflare_tunnel_credential_file, "CLOUDFLARE_TUNNEL_CREDENTIAL_FILE");
-    assert_eq!(details.cloudflare_tunnel_credential_secret, "CLOUDFLARE_TUNNEL_CREDENTIAL_SECRET");
+    assert_eq!(
+        details.cloudflare_tunnel_credential_file,
+        "CLOUDFLARE_TUNNEL_CREDENTIAL_FILE"
+    );
+    assert_eq!(
+        details.cloudflare_tunnel_credential_secret,
+        "CLOUDFLARE_TUNNEL_CREDENTIAL_SECRET"
+    );
 }

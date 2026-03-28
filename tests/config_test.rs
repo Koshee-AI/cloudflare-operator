@@ -35,7 +35,10 @@ fn test_configuration_yaml_roundtrip() {
     assert_eq!(deserialized.tunnel, config.tunnel);
     assert_eq!(deserialized.credentials_file, config.credentials_file);
     assert_eq!(deserialized.ingress.len(), 2);
-    assert_eq!(deserialized.ingress[0].hostname, Some("app.example.com".to_string()));
+    assert_eq!(
+        deserialized.ingress[0].hostname,
+        Some("app.example.com".to_string())
+    );
     assert_eq!(deserialized.ingress[0].service, "http://app.default.svc:80");
     assert!(deserialized.ingress[1].hostname.is_none());
     assert_eq!(deserialized.ingress[1].service, "http_status:404");
@@ -64,7 +67,10 @@ fn test_ingress_rule_serialization() {
     assert_eq!(parsed["hostname"].as_str().unwrap(), "ssh.example.com");
     assert_eq!(parsed["service"].as_str().unwrap(), "ssh://localhost:22");
     assert_eq!(parsed["path"].as_str().unwrap(), "/admin.*");
-    assert_eq!(parsed["originRequest"]["noTLSVerify"].as_bool().unwrap(), true);
+    assert_eq!(
+        parsed["originRequest"]["noTLSVerify"].as_bool().unwrap(),
+        true
+    );
 
     // Roundtrip
     let deserialized: UnvalidatedIngressRule = serde_yaml::from_str(&yaml_str).unwrap();
@@ -134,8 +140,14 @@ fn test_origin_request_config_serialization() {
     assert_eq!(parsed["noHappyEyeballs"].as_bool().unwrap(), false);
     assert_eq!(parsed["keepAliveConnections"].as_i64().unwrap(), 100);
     assert_eq!(parsed["keepAliveTimeout"].as_str().unwrap(), "90s");
-    assert_eq!(parsed["httpHostHeader"].as_str().unwrap(), "internal.example.com");
-    assert_eq!(parsed["originServerName"].as_str().unwrap(), "origin.example.com");
+    assert_eq!(
+        parsed["httpHostHeader"].as_str().unwrap(),
+        "internal.example.com"
+    );
+    assert_eq!(
+        parsed["originServerName"].as_str().unwrap(),
+        "origin.example.com"
+    );
     assert_eq!(parsed["caPool"].as_str().unwrap(), "/etc/ssl/certs/ca.pem");
     // noTLSVerify is a custom rename, not standard camelCase
     assert_eq!(parsed["noTLSVerify"].as_bool().unwrap(), false);
@@ -145,7 +157,10 @@ fn test_origin_request_config_serialization() {
     assert_eq!(parsed["proxyAddress"].as_str().unwrap(), "127.0.0.1");
     assert_eq!(parsed["proxyPort"].as_i64().unwrap(), 8080);
     assert_eq!(parsed["proxyType"].as_str().unwrap(), "socks");
-    assert_eq!(parsed["ipRules"][0]["prefix"].as_str().unwrap(), "10.0.0.0/8");
+    assert_eq!(
+        parsed["ipRules"][0]["prefix"].as_str().unwrap(),
+        "10.0.0.0/8"
+    );
 
     // Roundtrip
     let deserialized: OriginRequestConfig = serde_yaml::from_str(&yaml_str).unwrap();
@@ -153,7 +168,10 @@ fn test_origin_request_config_serialization() {
     assert_eq!(deserialized.http2_origin, Some(true));
     assert_eq!(deserialized.proxy_port, Some(8080));
     assert_eq!(deserialized.ip_rules.len(), 1);
-    assert_eq!(deserialized.ip_rules[0].prefix, Some("10.0.0.0/8".to_string()));
+    assert_eq!(
+        deserialized.ip_rules[0].prefix,
+        Some("10.0.0.0/8".to_string())
+    );
     assert_eq!(deserialized.ip_rules[0].ports, vec![80, 443]);
     assert!(deserialized.ip_rules[0].allow);
 }
@@ -171,7 +189,10 @@ credentials-file: "/etc/cloudflared/creds/credentials.json"
     let config: Configuration = serde_yaml::from_str(yaml).unwrap();
 
     assert_eq!(config.tunnel, "tun-123");
-    assert_eq!(config.credentials_file, "/etc/cloudflared/creds/credentials.json");
+    assert_eq!(
+        config.credentials_file,
+        "/etc/cloudflared/creds/credentials.json"
+    );
     assert!(config.ingress.is_empty());
     assert!(config.warp_routing.is_none());
     assert!(config.origin_request.is_none());
@@ -242,16 +263,40 @@ ingress:
     assert_eq!(config.ingress.len(), 3);
 
     // First rule
-    assert_eq!(config.ingress[0].hostname, Some("app.example.com".to_string()));
+    assert_eq!(
+        config.ingress[0].hostname,
+        Some("app.example.com".to_string())
+    );
     assert_eq!(config.ingress[0].service, "http://app.default.svc:80");
-    assert!(config.ingress[0].origin_request.as_ref().unwrap().no_tls_verify.unwrap());
+    assert!(
+        config.ingress[0]
+            .origin_request
+            .as_ref()
+            .unwrap()
+            .no_tls_verify
+            .unwrap()
+    );
 
     // Second rule with path
-    assert_eq!(config.ingress[1].hostname, Some("api.example.com".to_string()));
-    assert_eq!(config.ingress[1].path, Some("/v1/.*".to_string()));
-    assert!(config.ingress[1].origin_request.as_ref().unwrap().http2_origin.unwrap());
     assert_eq!(
-        config.ingress[1].origin_request.as_ref().unwrap().origin_server_name,
+        config.ingress[1].hostname,
+        Some("api.example.com".to_string())
+    );
+    assert_eq!(config.ingress[1].path, Some("/v1/.*".to_string()));
+    assert!(
+        config.ingress[1]
+            .origin_request
+            .as_ref()
+            .unwrap()
+            .http2_origin
+            .unwrap()
+    );
+    assert_eq!(
+        config.ingress[1]
+            .origin_request
+            .as_ref()
+            .unwrap()
+            .origin_server_name,
         Some("api.internal".to_string())
     );
 
